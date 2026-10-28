@@ -1,8 +1,8 @@
 """Modelos e cálculo do cronômetro, sem depender da interface ou do SQLite."""
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta, tzinfo
 
 
 @dataclass(frozen=True)
@@ -59,10 +59,11 @@ def as_utc(moment: datetime) -> datetime:
     return moment.astimezone(UTC)
 
 
-def elapsed_seconds(events: Iterable[SessionEvent], now: datetime) -> float:
-    """Soma os intervalos de estudo, incluindo o intervalo ainda em andamento."""
+def _study_intervals(
+    events: Iterable[SessionEvent], now: datetime
+) -> Iterator[tuple[datetime, datetime]]:
+    """Valida os eventos e produz somente os intervalos efetivos de estudo."""
     now = as_utc(now)
-    total = 0.0
     running_since = None
     previous_at = None
     started = False
@@ -89,11 +90,11 @@ def elapsed_seconds(events: Iterable[SessionEvent], now: datetime) -> float:
         elif event.kind == "pause":
             if running_since is None:
                 raise ValueError("A sessão já está pausada.")
-            total += (moment - running_since).total_seconds()
+            yield running_since, moment
             running_since = None
         elif event.kind == "finish":
             if running_since is not None:
-                total += (moment - running_since).total_seconds()
+                yield running_since, moment
             running_since = None
             finished = True
         else:
@@ -102,8 +103,15 @@ def elapsed_seconds(events: Iterable[SessionEvent], now: datetime) -> float:
 
     if running_since is not None:
         # Uma correção do relógio não deve produzir duração negativa na tela.
-        total += max(0.0, (now - running_since).total_seconds())
-    return total
+        yield running_since, max(running_since, now)
+
+
+def elapsed_seconds(events: Iterable[SessionEvent], now: datetime) -> float:
+    """Soma os intervalos de estudo, incluindo o intervalo ainda em andamento."""
+    return sum(
+        ((end - start).total_seconds() for start, end in _study_intervals(events, now)),
+        0.0,
+    )
 
 
 def format_duration(seconds: float) -> str:
@@ -121,12 +129,42 @@ def pomodoro_remaining_seconds(state: PomodoroState, now: datetime) -> float:
     return remaining
 
 
-def session_elapsed_seconds(session: StudySession, now: datetime) -> float:
-    """O foco Pomodoro para no prazo, mesmo antes de consolidar isso no banco."""
+def _session_clock(session: StudySession, now: datetime) -> datetime:
     now = as_utc(now)
     phase = session.pomodoro
     if (phase is not None and phase.phase == "focus" and phase.state == "running"
             and phase.started_at is not None):
         deadline = as_utc(phase.started_at) + timedelta(seconds=phase.remaining_seconds)
         now = min(now, deadline)
-    return elapsed_seconds(session.events, now)
+    return now
+
+
+def session_elapsed_seconds(session: StudySession, now: datetime) -> float:
+    """O foco Pomodoro para no prazo, mesmo antes de consolidar isso no banco."""
+    return elapsed_seconds(session.events, _session_clock(session, now))
+
+
+def session_study_seconds_between(
+    session: StudySession, start: datetime, end: datetime, now: datetime
+) -> float:
+    """Recorta os intervalos de estudo à janela [start, end), até o instante now."""
+    start, end, now = as_utc(start), as_utc(end), as_utc(now)
+    if end <= start:
+        raise ValueError("O fim do período precisa ser posterior ao início.")
+    total = 0.0
+    for study_start, study_end in _study_intervals(session.events, _session_clock(session, now)):
+        overlap_start = max(study_start, start)
+        overlap_end = min(study_end, end, now)
+        total += max(0.0, (overlap_end - overlap_start).total_seconds())
+    return total
+
+
+def local_day_window(
+    now: datetime, tz: tzinfo | None = None
+) -> tuple[date, datetime, datetime]:
+    """Converte as duas meias-noites locais em UTC, sem presumir um dia de 24h."""
+    day = as_utc(now).astimezone(tz).date()
+    # Sem tz explícito, astimezone interpreta cada meia-noite no fuso do SO.
+    start = datetime.combine(day, time.min, tzinfo=tz).astimezone(UTC)
+    end = datetime.combine(day + timedelta(days=1), time.min, tzinfo=tz).astimezone(UTC)
+    return day, start, end

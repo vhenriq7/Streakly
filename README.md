@@ -2,7 +2,7 @@
 
 Aplicativo pessoal de acompanhamento de estudos para **Windows e Android**, com registro de tempo, Pomodoro, metas diárias, ofensivas (streaks), calendário e estatísticas. Projeto **offline-first**: os dados são gravados localmente e sincronizados com a nuvem quando houver conexão.
 
-> **Status:** prova de conceito. A base 0.1.0 foi validada no Windows e no Moto G84 5G, e o cronômetro progressivo 0.2.0 foi confirmado no Windows. A versão 0.5.0 acrescenta avisos de término de fase no Windows ao Pomodoro personalizado 0.4.0, com o aplicativo aberto, inclusive minimizado. Os 39 testes automatizados e a integração com controles Flet passaram. O usuário confirmou a exibição real do aviso de foco concluído no Windows em 28/10/2026. Avisos Android e com o app fechado seguem pendentes, nos marcos combinados.
+> **Status:** início do MVP offline. A versão 0.6.0 acrescenta o painel **Tempo estudado hoje**, somando as matérias e a sessão em andamento por dia local, com acesso à sessão e às matérias. Os 51 testes automatizados e a integração com controles Flet passaram; falta conferir o painel na janela do Windows. As provas de conceito anteriores validaram persistência no Windows/Android, cronômetro progressivo no Windows e exibição do aviso de foco concluído no Windows, este confirmado pelo usuário em 28/10/2026. Avisos Android e com o app fechado seguem pendentes, nos marcos combinados.
 
 ## Funcionalidades planejadas
 
@@ -93,9 +93,9 @@ Para executar os testes, que usam apenas bancos temporários:
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-Os testes cobrem recuperação em outro processo, pausas, sessão única, concorrência, rollback em falha, migração e duração atravessando meia-noite. A distribuição do tempo por dia para metas e estatísticas será implementada com essas funcionalidades. O cálculo depende da hora correta do dispositivo; transições anteriores ao último evento são recusadas, mas a política completa para alterações manuais do relógio ainda não foi implementada.
+Os testes cobrem recuperação em outro processo, pausas, sessão única, concorrência, rollback em falha, migração e duração atravessando meia-noite. O rateio por dia foi acrescentado no painel 0.6.0; metas e estatísticas completas continuam nas etapas seguintes. O cálculo depende da hora correta do dispositivo; transições anteriores ao último evento são recusadas, mas a política completa para alterações manuais do relógio ainda não foi implementada.
 
-Para validar o cronômetro agora, execute `main.py` no Windows, inicie uma sessão, alterne entre as duas telas, feche e reabra. Depois pause, feche novamente e confirme que o tempo permanece parado. Retome e finalize para conferir a duração sem as pausas. Nos marcos de validação Android, repetir esse roteiro atualizando o APK existente. As sessões finalizadas ficam no banco; a tela de histórico ainda não faz parte desta etapa.
+Para validar o cronômetro agora, execute `main.py` no Windows, inicie uma sessão, navegue entre **Início**, **Matérias** e **Cronômetro**, feche e reabra. Depois pause, feche novamente e confirme que o tempo permanece parado. Retome e finalize para conferir a duração sem as pausas. Nos marcos de validação Android, repetir esse roteiro atualizando o APK existente. As sessões finalizadas ficam no banco; a tela de histórico ainda não faz parte desta etapa.
 
 ### Pomodoro básico — versão 0.3.0
 
@@ -128,6 +128,16 @@ O envio usa Windows PowerShell e `System.Windows.Forms.NotifyIcon`, componentes 
 `notifications.py` detecta conclusões e faz o envio; `main.py` o executa com `asyncio.to_thread`, para manter a interface responsiva. Não há alteração no esquema 4 do banco. Falhas no aviso mantêm o registro da sessão e a mensagem na tela.
 
 Para validar, execute `main.py`, escolha Pomodoro e clique em **Testar aviso do Windows**. Depois inicie um foco personalizado de 1 minuto e minimize a janela. Ao terminar, confira o aviso e restaure a janela: a próxima fase deve continuar aguardando início manual. Os testes automatizados usam envio simulado e bancos temporários, cobrindo janela oculta, reabertura, reconexão e falha no envio. O usuário confirmou em 28/10/2026 a exibição do aviso de foco concluído para a matéria Python, oferecendo início manual da pausa curta. O aviso aparece com o cabeçalho Windows PowerShell nesta PoC; identidade própria do Streakly fica para o empacotamento. O roteiro acima permanece para conferir as demais fases e a janela minimizada. Android mantém o aviso na tela nesta versão; não foi gerado APK novo.
+
+### Painel diário — versão 0.6.0
+
+O app abre em **Início**, com a data e o **Tempo estudado hoje** somando todas as matérias, sessões finalizadas e o trecho de estudo da sessão ativa. Esse total é informativo. Os atalhos das matérias abrem o cronômetro com a matéria escolhida; **Abrir sessão em andamento** recupera a sessão ativa, inclusive pausada ou aguardando a próxima fase. Trocar de tela preserva a sessão.
+
+O total considera o dia local configurado no dispositivo. Um estudo das 23h50 às 00h10 contribui com 10 minutos para cada dia. Pausas manuais, intervalos Pomodoro e espera não contam. Ao virar o dia, somente a exibição diária começa de zero; sessões e eventos permanecem salvos. A contagem Pomodoro fica limitada ao prazo do foco, mesmo ao reabrir o app depois dele. Mudar o fuso do dispositivo recalcula o dia exibido; a política entre dispositivos ficará para a sincronização.
+
+O esquema SQLite continua na versão 4. O painel calcula o total a partir dos eventos existentes, sem gravar um contador diário nem instalar dependências. Os testes usam horários simulados e verificam inclusive fronteiras de meia-noite e janelas de 23/25 horas. A integração com controles Flet passou; a conferência na janela nativa ainda está pendente. Nenhum APK foi gerado nesta etapa.
+
+Para conferir no Windows, inicie uma sessão progressiva e volte a **Início**: o total deve crescer. Pause pelo cronômetro e volte: o total deve ficar parado. Finalize e confirme que o acumulado permanece; depois estude outra matéria para verificar a soma. Feche e reabra para conferir a recuperação da sessão e do total.
 
 ## Princípios de desenvolvimento
 

@@ -1,6 +1,6 @@
 import asyncio
 import sqlite3
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from math import ceil
 
 import flet as ft
@@ -16,9 +16,8 @@ from storage import (
     finish_session,
     get_subject_timer_settings,
     initialize_database,
-    list_subject_options,
     pause_session,
-    refresh_active_session,
+    read_study_overview,
     resume_session,
     start_next_phase,
     start_session,
@@ -41,6 +40,8 @@ async def main(page: ft.Page) -> None:
     session: StudySession | None = None
     subject_options: list[tuple[str, str]] = []
     settings_subject: str | None = None
+    today: date | None = None
+    today_seconds = 0.0
     busy = False
     ready = False
     state_lock = asyncio.Lock()
@@ -53,6 +54,13 @@ async def main(page: ft.Page) -> None:
     message = ft.Text()
     name_field = ft.TextField(label="Nome da matéria", hint_text="Ex.: Python")
     subjects = ft.ListView(
+        controls=[ft.Text("Nenhuma matéria cadastrada ainda.")],
+        expand=True, spacing=8,
+    )
+    daily_date = ft.Text()
+    daily_total = ft.Text("Carregando…", size=40, weight=ft.FontWeight.BOLD)
+    home_session = ft.Text()
+    home_subjects = ft.ListView(
         controls=[ft.Text("Nenhuma matéria cadastrada ainda.")],
         expand=True, spacing=8,
     )
@@ -127,8 +135,19 @@ async def main(page: ft.Page) -> None:
         ))
         render()
 
-    def read_state():
-        return list_subject_options(), refresh_active_session()
+    def subject_shortcut(subject_id: str, name: str) -> ft.TextButton:
+        async def open_subject(event) -> None:
+            if busy or not ready:
+                return
+            if session:
+                if session.subject_id != subject_id:
+                    message.value = "Retome ou finalize a sessão ativa antes de trocar de matéria."
+            else:
+                subject_choice.value = subject_id
+                await choose_subject(event)
+            show_timer(event)
+
+        return ft.TextButton(name, on_click=open_subject)
 
     def fill_pomodoro_fields(settings) -> None:
         preset_choice.value = settings.preset
@@ -160,14 +179,17 @@ async def main(page: ft.Page) -> None:
                     preset="custom")
 
     async def refresh_state() -> None:
-        nonlocal session, subject_options, settings_subject, ready
+        nonlocal session, subject_options, settings_subject, ready, today, today_seconds
         previous = session
-        choices, active = await asyncio.to_thread(read_state)
+        overview = await asyncio.to_thread(read_study_overview, at=datetime.now(UTC))
+        choices, active = list(overview.subjects), overview.active_session
         if choices != subject_options:
             subject_options = choices
             subjects.controls = [ft.Text(name) for _, name in choices]
+            home_subjects.controls = [subject_shortcut(key, name) for key, name in choices]
             if not choices:
                 subjects.controls = [ft.Text("Nenhuma matéria cadastrada ainda.")]
+                home_subjects.controls = [ft.Text("Nenhuma matéria cadastrada ainda.")]
             subject_choice.options = [
                 ft.DropdownOption(key=subject_id, text=name)
                 for subject_id, name in choices
@@ -180,6 +202,7 @@ async def main(page: ft.Page) -> None:
             fill_pomodoro_fields(settings)
             settings_subject = subject_choice.value
         session = active
+        today, today_seconds = overview.day, overview.total_seconds
         ready = True
         notice = alert_tracker.observe(active)
         if notice:
@@ -209,6 +232,12 @@ async def main(page: ft.Page) -> None:
         waiting = phase is not None and phase.state == "ready"
 
         name_field.disabled = save_button.disabled = locked
+        open_session_button.visible = active
+        open_session_button.disabled = locked
+        for shortcut in home_subjects.controls:
+            shortcut.disabled = locked
+        daily_date.value = today.strftime("%d/%m/%Y") if today else ""
+        daily_total.value = format_duration(today_seconds) if ready else "Total indisponível"
         for field in (subject_choice, study_type, topic, mode_choice, preset_choice, *custom_fields):
             field.disabled = locked or active
         preset_choice.visible = is_pomodoro
@@ -276,6 +305,11 @@ async def main(page: ft.Page) -> None:
             study_total.value = "Tempo de estudo nesta sessão: 00:00:00"
             timer_status.value = "Pronto para iniciar o foco." if is_pomodoro else "Nenhuma sessão ativa."
             session_details.value = "Escolha a matéria e o tipo de estudo para começar."
+        home_session.value = (
+            f"{session.subject_name} · {session.study_type}\n"
+            f"{timer_status.value} · {format_duration(session_elapsed_seconds(session, now))} de estudo na sessão."
+            if session else "Nenhuma sessão em andamento."
+        )
         if connected and page.app_visible:
             page.update()
 
@@ -403,6 +437,7 @@ async def main(page: ft.Page) -> None:
     next_button = ft.Button("Iniciar próxima fase", on_click=next_phase)
     finish_button = ft.Button("Finalizar", on_click=finish)
     test_notice_button = ft.TextButton("Testar aviso do Windows", on_click=test_notice)
+    open_session_button = ft.TextButton("Abrir sessão em andamento", on_click=lambda event: show_timer(event))
     subject_choice.on_select = choose_subject
     mode_choice.on_select = preset_choice.on_select = choose_mode_or_preset
     for field in custom_fields:
@@ -410,6 +445,15 @@ async def main(page: ft.Page) -> None:
 
     subjects_panel = ft.Column(
         [ft.Text("Minhas matérias", size=20), name_field, save_button, subjects],
+        expand=True, visible=False, horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+    )
+    home_panel = ft.Column(
+        [
+            ft.Text("Tempo estudado hoje", size=20), daily_date, daily_total,
+            ft.Text("Somando todas as matérias. Pausas e intervalos não contam."),
+            ft.Text("Sessão em andamento", size=20), home_session, open_session_button,
+            ft.Text("Minhas matérias", size=20), home_subjects,
+        ],
         expand=True, horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
     )
     timer_panel = ft.Column(
@@ -425,11 +469,15 @@ async def main(page: ft.Page) -> None:
     )
 
     def show_subjects(event) -> None:
-        subjects_panel.visible, timer_panel.visible = True, False
+        home_panel.visible, subjects_panel.visible, timer_panel.visible = False, True, False
         page.update()
 
     def show_timer(event) -> None:
-        subjects_panel.visible, timer_panel.visible = False, True
+        home_panel.visible, subjects_panel.visible, timer_panel.visible = False, False, True
+        page.update()
+
+    def show_home(event) -> None:
+        home_panel.visible, subjects_panel.visible, timer_panel.visible = True, False, False
         page.update()
 
     page.add(ft.SafeArea(
@@ -437,10 +485,11 @@ async def main(page: ft.Page) -> None:
             [
                 ft.Text("Streakly", size=28),
                 ft.Row([
+                    ft.TextButton("Início", on_click=show_home),
                     ft.TextButton("Matérias", on_click=show_subjects),
                     ft.TextButton("Cronômetro", on_click=show_timer),
                 ], wrap=True),
-                message, subjects_panel, timer_panel,
+                message, home_panel, subjects_panel, timer_panel,
             ],
             expand=True, horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
         ),
@@ -460,7 +509,6 @@ async def main(page: ft.Page) -> None:
         render()
         return
     if session:
-        subjects_panel.visible, timer_panel.visible = False, True
         if not session.pomodoro or session.pomodoro.state != "ready":
             message.value = "Sessão recuperada com os horários salvos."
     render()

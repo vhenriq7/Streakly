@@ -4,14 +4,15 @@ import os
 import sqlite3
 from collections.abc import Iterator
 from contextlib import closing, contextmanager
-from dataclasses import replace
-from datetime import UTC, datetime, timedelta
+from dataclasses import dataclass, replace
+from datetime import UTC, date, datetime, timedelta, tzinfo
 from pathlib import Path
 from uuid import uuid4
 
 from timer import (
     PomodoroState, SessionEvent, StudySession, TimerSettings,
-    as_utc, elapsed_seconds, pomodoro_remaining_seconds,
+    as_utc, elapsed_seconds, local_day_window, pomodoro_remaining_seconds,
+    session_study_seconds_between,
 )
 
 
@@ -21,6 +22,14 @@ NAMED_PRESETS = {
     "25/5": (1500, 300, 900, 4),
     "50/10": (3000, 600, 900, 4),
 }
+
+
+@dataclass(frozen=True)
+class StudyOverview:
+    subjects: tuple[tuple[str, str], ...]
+    active_session: StudySession | None
+    day: date
+    total_seconds: float
 
 
 def database_path() -> Path:
@@ -277,6 +286,36 @@ def get_session(session_id: str) -> StudySession:
 def get_active_session() -> StudySession | None:
     with _connection() as connection:
         return _read_active_session(connection)
+
+
+def read_study_overview(*, at: datetime | None = None, tz: tzinfo | None = None) -> StudyOverview:
+    """Lê matérias, sessão ativa e total de hoje a partir da mesma visão do banco."""
+    moment = as_utc(at if at is not None else datetime.now(UTC))
+    day, start, end = local_day_window(moment, tz)
+    # Consolida um prazo vencido antes de abrir a visão consistente de leitura.
+    refresh_active_session(at=moment)
+    with _connection() as connection:
+        subjects = connection.execute(
+            "SELECT id, name FROM subjects ORDER BY name COLLATE NOCASE, id"
+        ).fetchall()
+        active = _read_active_session(connection)
+        candidates = connection.execute(
+            """
+            SELECT id FROM sessions
+            WHERE started_at < ? AND (ended_at IS NULL OR ended_at > ?)
+            ORDER BY started_at, id
+            """,
+            (end.isoformat(), start.isoformat()),
+        ).fetchall()
+        total = 0.0
+        for row in candidates:
+            # Reutiliza a mesma sessão ativa que será exibida na interface.
+            session = active if active and row["id"] == active.id else _read_session(connection, row["id"])
+            total += session_study_seconds_between(session, start, end, moment)
+        return StudyOverview(
+            subjects=tuple((row["id"], row["name"]) for row in subjects),
+            active_session=active, day=day, total_seconds=total,
+        )
 
 
 def _read_active_session(connection: sqlite3.Connection) -> StudySession | None:

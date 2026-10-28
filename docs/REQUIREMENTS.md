@@ -19,6 +19,7 @@ Aplicativo pessoal de estudos para **Windows e Android**, com experiência simpl
 - Exibir **total de estudo acumulado no dia**, somando todas as matérias. **Não** é botão para iniciar cronômetro.
 - Atualizar enquanto houver sessão em andamento e reiniciar apenas a **exibição diária** à meia-noite; nunca apagar histórico.
 - Exibir matérias e acesso à sessão ativa.
+- **MVP 0.6.0:** o painel usa o dia do fuso local atual do dispositivo e calcula o total pelos eventos UTC, incluindo sessões finalizadas e a sessão ativa uma única vez. Repartir intervalos pela meia-noite local, excluindo pausas e espera. Ao mudar o dia, recalcular a exibição sem apagar registros. Alterar o fuso muda o dia exibido; a política de histórico entre dispositivos permanece para a sincronização.
 
 ### Cronômetro individual
 
