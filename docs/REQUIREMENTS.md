@@ -88,6 +88,7 @@ Aplicativo pessoal de estudos para **Windows e Android**, com experiência simpl
 ## 9. Lembretes e notificações
 
 - Avisar conclusão de fase de foco e pausa Pomodoro.
+- **PoC 0.5.0:** avisos do Windows com o app aberto, inclusive minimizado, mantendo início manual da próxima fase. Cada conclusão gera uma tentativa por instância; falha no envio não altera os dados nem repete o aviso a cada consulta. Na abertura, conclusões anteriores aparecem na tela sem notificação atrasada. O Windows controla a exibição; envio aceito não garante entrega visual. Avisos Android e agendamento com o app fechado permanecem para validação posterior.
 - Lembretes de estudo em horários configuráveis.
 - Alerta de meta pendente em horário configurável, somente se a meta não tiver sido atingida e o dia não for de descanso.
 - Preferências sincronizadas, quando aplicável.

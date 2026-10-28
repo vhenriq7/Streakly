@@ -5,6 +5,12 @@ from math import ceil
 
 import flet as ft
 
+from notifications import (
+    PhaseAlertTracker,
+    PhaseNotice,
+    send_windows_notice,
+    windows_notifications_available,
+)
 from storage import (
     add_subject,
     finish_session,
@@ -39,6 +45,10 @@ async def main(page: ft.Page) -> None:
     ready = False
     state_lock = asyncio.Lock()
     ticker = None
+    connected = True
+    notifications_available = windows_notifications_available()
+    alert_tracker = PhaseAlertTracker()
+    pending_notices: set[asyncio.Task] = set()
 
     message = ft.Text()
     name_field = ft.TextField(label="Nome da matéria", hint_text="Ex.: Python")
@@ -85,6 +95,37 @@ async def main(page: ft.Page) -> None:
     timer_status = ft.Text("Nenhuma sessão ativa.")
     session_details = ft.Text()
     timer_note = ft.Text()
+    notification_hint = ft.Text(
+        "Mantenha o app aberto para receber avisos do Windows, inclusive minimizado."
+        if notifications_available else "A conclusão de cada fase aparece nesta tela."
+    )
+
+    async def deliver_notice(notice: PhaseNotice) -> None:
+        try:
+            sent = await asyncio.to_thread(send_windows_notice, notice)
+            notification_hint.value = (
+                "Aviso enviado ao Windows. A exibição depende das configurações do sistema."
+                if sent else "Não foi possível enviar o aviso do Windows. Confira a conclusão nesta tela."
+            )
+        finally:
+            pending_notices.discard(asyncio.current_task())
+            if connected:
+                render()
+
+    def queue_notice(notice: PhaseNotice) -> None:
+        if notifications_available and connected:
+            task = asyncio.create_task(deliver_notice(notice))
+            pending_notices.add(task)
+            task.add_done_callback(pending_notices.discard)
+
+    def test_notice(event) -> None:
+        if pending_notices:
+            return
+        queue_notice(PhaseNotice(
+            "Streakly — teste de aviso",
+            "Os avisos do Pomodoro funcionam com o app aberto, inclusive minimizado.",
+        ))
+        render()
 
     def read_state():
         return list_subject_options(), refresh_active_session()
@@ -140,6 +181,9 @@ async def main(page: ft.Page) -> None:
             settings_subject = subject_choice.value
         session = active
         ready = True
+        notice = alert_tracker.observe(active)
+        if notice:
+            queue_notice(notice)
         if active and active.pomodoro and active.pomodoro.state == "ready":
             if (not previous or previous.id != active.id or not previous.pomodoro
                     or previous.pomodoro.state != "ready"
@@ -169,6 +213,9 @@ async def main(page: ft.Page) -> None:
             field.disabled = locked or active
         preset_choice.visible = is_pomodoro
         custom_panel.visible = is_pomodoro and preset_choice.value == "custom"
+        notification_hint.visible = is_pomodoro
+        test_notice_button.visible = is_pomodoro and notifications_available
+        test_notice_button.disabled = locked or bool(pending_notices)
         start_button.disabled = locked or active or not subject_options
         pause_button.visible = active and (phase.state == "running" if phase else session.status == "running")
         resume_button.visible = active and (phase.state == "paused" if phase else session.status == "paused")
@@ -229,7 +276,8 @@ async def main(page: ft.Page) -> None:
             study_total.value = "Tempo de estudo nesta sessão: 00:00:00"
             timer_status.value = "Pronto para iniciar o foco." if is_pomodoro else "Nenhuma sessão ativa."
             session_details.value = "Escolha a matéria e o tipo de estudo para começar."
-        page.update()
+        if connected and page.app_visible:
+            page.update()
 
     async def save_subject(event) -> None:
         nonlocal busy, ready
@@ -354,6 +402,7 @@ async def main(page: ft.Page) -> None:
     resume_button = ft.Button("Retomar", on_click=resume)
     next_button = ft.Button("Iniciar próxima fase", on_click=next_phase)
     finish_button = ft.Button("Finalizar", on_click=finish)
+    test_notice_button = ft.TextButton("Testar aviso do Windows", on_click=test_notice)
     subject_choice.on_select = choose_subject
     mode_choice.on_select = preset_choice.on_select = choose_mode_or_preset
     for field in custom_fields:
@@ -369,7 +418,7 @@ async def main(page: ft.Page) -> None:
             elapsed, timer_status, study_total, cycle_info, session_details,
             subject_choice, study_type, topic, mode_choice, preset_choice, custom_panel,
             ft.Row([start_button, pause_button, resume_button, next_button, finish_button], wrap=True),
-            timer_note,
+            timer_note, notification_hint, test_notice_button,
         ],
         expand=True, visible=False, scroll=ft.ScrollMode.AUTO,
         horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
@@ -419,7 +468,10 @@ async def main(page: ft.Page) -> None:
     async def update_timer() -> None:
         nonlocal ready
         while True:
-            await page.wait_until_visible()
+            # No Windows, observar prazos também com a janela minimizada.
+            # As atualizações visuais continuam restritas à janela visível.
+            if not notifications_available:
+                await page.wait_until_visible()
             if not busy:
                 async with state_lock:
                     if not busy:
@@ -435,13 +487,18 @@ async def main(page: ft.Page) -> None:
             await asyncio.sleep(1)
 
     def start_updates(event=None) -> None:
-        nonlocal ticker
+        nonlocal ticker, connected
+        connected = True
         if ticker is None or ticker.done():
             ticker = page.run_task(update_timer)
 
     def stop_updates(event=None) -> None:
+        nonlocal connected
+        connected = False
         if ticker:
             ticker.cancel()
+        for task in tuple(pending_notices):
+            task.cancel()
 
     def on_lifecycle(event: ft.AppLifecycleStateChangeEvent) -> None:
         if event.state == ft.AppLifecycleState.DETACH:

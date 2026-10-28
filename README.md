@@ -2,7 +2,7 @@
 
 Aplicativo pessoal de acompanhamento de estudos para **Windows e Android**, com registro de tempo, Pomodoro, metas diárias, ofensivas (streaks), calendário e estatísticas. Projeto **offline-first**: os dados são gravados localmente e sincronizados com a nuvem quando houver conexão.
 
-> **Status:** prova de conceito. A base 0.1.0 foi validada no Windows e no Moto G84 5G, e o cronômetro progressivo 0.2.0 foi confirmado no Windows. A versão 0.4.0 amplia o Pomodoro 0.3.0 com tempos personalizados e pausa longa a cada N focos completos, mantendo início manual e preferências por matéria. Os 29 testes automatizados e a integração com controles Flet passaram; falta a conferência do usuário na janela do Windows. Notificações do sistema ficam para uma etapa seguinte. Android segue reservado aos marcos combinados.
+> **Status:** prova de conceito. A base 0.1.0 foi validada no Windows e no Moto G84 5G, e o cronômetro progressivo 0.2.0 foi confirmado no Windows. A versão 0.5.0 acrescenta avisos de término de fase no Windows ao Pomodoro personalizado 0.4.0, com o aplicativo aberto, inclusive minimizado. Os 39 testes automatizados e a integração com controles Flet passaram. O usuário confirmou a exibição real do aviso de foco concluído no Windows em 28/10/2026. Avisos Android e com o app fechado seguem pendentes, nos marcos combinados.
 
 ## Funcionalidades planejadas
 
@@ -61,7 +61,7 @@ Para gerar o APK de teste:
 .\.venv\Scripts\python.exe build_android.py
 ```
 
-Esse script executa `flet build apk`. Quando o caminho do repositório contém acentos, copia apenas `main.py`, `storage.py`, `timer.py` e `pyproject.toml` para `%PUBLIC%\Documents\Streakly-Android-PoC\app`, evitando uma limitação do gerador nativo do Dart. O repositório, o banco e a `.venv` permanecem nos locais originais. Essa pasta auxiliar conserva os arquivos gerados para acelerar novas compilações; o APK final é copiado de volta para `build/apk/` no repositório.
+Esse script executa `flet build apk`. Quando o caminho do repositório contém acentos, copia apenas `main.py`, `storage.py`, `timer.py`, `notifications.py` e `pyproject.toml` para `%PUBLIC%\Documents\Streakly-Android-PoC\app`, evitando uma limitação do gerador nativo do Dart. O repositório, o banco e a `.venv` permanecem nos locais originais. Essa pasta auxiliar conserva os arquivos gerados para acelerar novas compilações; o APK final é copiado de volta para `build/apk/` no repositório.
 
 O cache dos pacotes Dart (`PUB_CACHE`) fica em `build/pub-cache` dentro da pasta efetiva de compilação, pois os plugins nativos também precisam de caminhos sem acentos. Esse ajuste vale apenas para os processos iniciados pelo script; não muda as variáveis permanentes do Windows.
 
@@ -116,6 +116,18 @@ Somente completar um foco aumenta o contador. Após cada múltiplo da quantidade
 O esquema 4 acrescenta as configurações e o contador sem recriar sessões ou eventos. A migração recupera os focos completos das sessões antigas e mantém a fase e o tempo restante já salvos; uma pausa antiga em andamento ou aguardando início continua curta.
 
 Para conferir na janela do Windows, finalize a sessão anterior e escolha **Personalizado**: foco 1 minuto, pausa curta 1, pausa longa 2 e quantidade 2. Após o primeiro foco, inicie a pausa curta; após o segundo, deve aparecer **Iniciar pausa longa**, com 2 minutos de estudo acumulados. Feche e reabra durante a espera ou com a contagem pausada para conferir a recuperação. Os testes automatizados verificam esses mesmos ciclos com relógio simulado e bancos temporários. Nenhuma dependência nova ou APK é necessário nesta etapa.
+
+### Avisos Pomodoro no Windows — versão 0.5.0
+
+No modo **Pomodoro**, use **Testar aviso do Windows** para conferir a exibição sem iniciar ou alterar uma sessão. Ao completar um foco, uma pausa curta ou uma pausa longa, o aplicativo solicita um aviso do Windows com a próxima ação manual. O cronômetro continua aguardando seu comando.
+
+O aplicativo precisa permanecer aberto; pode ficar minimizado. Nessa condição, ele continua verificando o prazo, sem enviar atualizações visuais à janela oculta. Ao fechar o app, a verificação é encerrada. Reabrir uma fase já concluída recupera a mensagem na tela, sem disparar um aviso atrasado. Cada conclusão gera no máximo uma tentativa de envio por instância aberta, inclusive se o envio falhar. A deduplicação não é compartilhada entre duas instâncias do aplicativo.
+
+O envio usa Windows PowerShell e `System.Windows.Forms.NotifyIcon`, componentes do Windows, sem dependências Python adicionais. Um ícone temporário permanece na área de notificações por cerca de 12 segundos e é removido ao terminar. Um envio já iniciado pode terminar após fechar o app. A exibição e a duração do aviso dependem das configurações de notificações do Windows; sucesso no envio não comprova que o usuário viu o aviso. [Referência Microsoft](https://learn.microsoft.com/en-us/dotnet/api/system.windows.forms.notifyicon.showballoontip?view=windowsdesktop-10.0).
+
+`notifications.py` detecta conclusões e faz o envio; `main.py` o executa com `asyncio.to_thread`, para manter a interface responsiva. Não há alteração no esquema 4 do banco. Falhas no aviso mantêm o registro da sessão e a mensagem na tela.
+
+Para validar, execute `main.py`, escolha Pomodoro e clique em **Testar aviso do Windows**. Depois inicie um foco personalizado de 1 minuto e minimize a janela. Ao terminar, confira o aviso e restaure a janela: a próxima fase deve continuar aguardando início manual. Os testes automatizados usam envio simulado e bancos temporários, cobrindo janela oculta, reabertura, reconexão e falha no envio. O usuário confirmou em 28/10/2026 a exibição do aviso de foco concluído para a matéria Python, oferecendo início manual da pausa curta. O aviso aparece com o cabeçalho Windows PowerShell nesta PoC; identidade própria do Streakly fica para o empacotamento. O roteiro acima permanece para conferir as demais fases e a janela minimizada. Android mantém o aviso na tela nesta versão; não foi gerado APK novo.
 
 ## Princípios de desenvolvimento
 
