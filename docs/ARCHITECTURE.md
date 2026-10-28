@@ -106,14 +106,21 @@ Evitar a regra simplista de “última escrita vence” para sessões e metas. O
 
 ## 9. Prova de conceito obrigatória
 
+**Andamento:** execução da janela e persistência SQLite após fechar/reabrir confirmadas no Windows. O APK Android 0.1.0 foi gerado e teve assinatura, integridade e presença de SQLite verificadas. Em 28/10/2026, o usuário confirmou instalação, execução e persistência offline após fechar/reabrir no Moto G84 5G. Essa validação cobre a janela e o cadastro local de matérias; retomada de cronômetro e notificações continuam pendentes.
+
+O Android reutiliza `main.py` e `storage.py`, com `pyproject.toml` para empacotamento. O banco usa `FLET_APP_STORAGE_DATA`; no Windows, o caminho original em `%LOCALAPPDATA%\Streakly` foi mantido para preservar os dados já cadastrados. `build_android.py` contorna limitações de caminhos com acentos do Flet/Flutter/CMake nesta instalação Windows, usando uma cópia apenas do código em pasta auxiliar e o SDK em caminho sem acentos. Os detalhes de execução estão no README. Autenticação e sincronização continuam reservadas à etapa de nuvem.
+
 Antes do MVP completo:
 
 1. Empacotar e executar um aplicativo Flet simples no Android e Windows.
 2. Persistir SQLite em diretório durável em ambas as plataformas.
 3. Iniciar cronômetro, alternar telas, encerrar/reabrir e reconstruir duração.
 4. Testar alertas Pomodoro e lembretes no Android em primeiro plano, segundo plano e app encerrado.
-5. Autenticar via e-mail e Google, incluindo retorno ao app.
-6. Sincronizar sessões criadas offline nos dois dispositivos e detectar edição conflitante.
+
+Na etapa de conta e sincronização, antes de concluir a integração com a nuvem:
+
+1. Autenticar via e-mail e Google, incluindo retorno ao app.
+2. Sincronizar sessões criadas offline nos dois dispositivos e detectar edição conflitante.
 
 Se Flet não atender aos critérios, reavaliar somente a camada de interface, preservando requisitos e modelo de domínio.
 

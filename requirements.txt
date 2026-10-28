@@ -1,0 +1,2 @@
+# Ferramentas para desenvolver no Windows. O APK usa o pyproject.toml.
+flet[cli,desktop]==1.0.5

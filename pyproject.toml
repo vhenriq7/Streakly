@@ -1,0 +1,16 @@
+[project]
+name = "streakly"
+version = "0.1.0"
+description = "Prova de conceito offline de acompanhamento de estudos"
+requires-python = ">=3.14,<3.15"
+dependencies = ["flet==1.0.5"]
+
+[tool.flet]
+product = "Streakly"
+bundle_id = "com.streakly.poc"
+build_number = 1
+
+[tool.flet.app]
+path = "."
+module = "main"
+exclude = [".venv", ".git", ".flet", ".vscode", "__pycache__", "docs", "tests", "README.md", "requirements.txt", "build_android.py"]

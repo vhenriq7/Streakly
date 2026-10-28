@@ -2,7 +2,7 @@
 
 Aplicativo pessoal de acompanhamento de estudos para **Windows e Android**, com registro de tempo, Pomodoro, metas diárias, ofensivas (streaks), calendário e estatísticas. Projeto **offline-first**: os dados são gravados localmente e sincronizados com a nuvem quando houver conexão.
 
-> **Status:** planejamento. Ainda não há implementação. Stack sujeita a testes de viabilidade, especialmente no Android.
+> **Status:** prova de conceito. Janela Flet e cadastro local de matérias com SQLite validados no Windows e no Moto G84 5G, incluindo fechar/reabrir e uso offline no celular, conforme confirmação do usuário. APK Android 0.1.0 gerado e verificado. Retomada de cronômetro e notificações ainda dependem das próximas provas de viabilidade.
 
 ## Funcionalidades planejadas
 
@@ -38,8 +38,44 @@ A proposta é operar com **custo zero dentro dos limites dos planos gratuitos**,
 
 ## Documentação
 
-- [Requisitos e regras de negócio](REQUIREMENTS.md)
-- [Arquitetura e decisões técnicas](ARCHITECTURE.md)
+- [Requisitos e regras de negócio](docs/REQUIREMENTS.md)
+- [Arquitetura e decisões técnicas](docs/ARCHITECTURE.md)
+
+## Executar a prova de conceito
+
+No PowerShell, dentro do projeto, usando o Python 3.14:
+
+```powershell
+py -3.14 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe main.py
+```
+
+Se a `.venv` já existe, pule o primeiro comando. `requirements.txt` instala as ferramentas de desenvolvimento no Windows. `pyproject.toml` define as dependências do aplicativo empacotado, sem o cliente desktop no Android.
+
+Para gerar o APK de teste:
+
+```powershell
+.\.venv\Scripts\python.exe build_android.py
+```
+
+Esse script executa `flet build apk`. Quando o caminho do repositório contém acentos, copia apenas `main.py`, `storage.py` e `pyproject.toml` para `%PUBLIC%\Documents\Streakly-Android-PoC\app`, evitando uma limitação do gerador nativo do Dart. O repositório, o banco e a `.venv` permanecem nos locais originais. Essa pasta auxiliar conserva os arquivos gerados para acelerar novas compilações; o APK final é copiado de volta para `build/apk/` no repositório.
+
+O cache dos pacotes Dart (`PUB_CACHE`) fica em `build/pub-cache` dentro da pasta efetiva de compilação, pois os plugins nativos também precisam de caminhos sem acentos. Esse ajuste vale apenas para os processos iniciados pelo script; não muda as variáveis permanentes do Windows.
+
+Neste computador, o Android SDK instalado pelo Flet foi realocado para `%PUBLIC%\Documents\Streakly-Android-PoC\android-sdk`, pois o CMake também apresentou incompatibilidade com o caminho do SDK contendo acentos. O script reconhece essa instalação e define `ANDROID_HOME` apenas durante a compilação.
+
+Somente se ocorrer o erro conhecido de leitura do caminho do Flutter com acentos, o script corrige os escapes de `local.properties` e continua pelo Gradle. Ele mantém as variáveis necessárias para incluir o código e as dependências Python no APK. Essa adaptação foi feita para Windows com Flet/CLI 1.0.5; erros diferentes são exibidos sem serem ignorados. O script não faz parte do aplicativo instalado.
+
+A primeira compilação baixa Flutter, JDK e Android SDK caso estejam ausentes; requer internet e espaço em disco. O APK é gerado em `build/apk/`. Não é necessário instalar Android Studio nem publicar na Play Store.
+
+O APK atual usa assinatura de teste. Foram verificados a integridade dos arquivos, a assinatura e a inclusão de SQLite nas três arquiteturas (`arm64-v8a`, `armeabi-v7a` e `x86_64`). Ele não contém o banco do Windows, ferramentas de desenvolvimento nem o script de compilação. Em 28/10/2026, o usuário confirmou instalação, execução e persistência após fechar/reabrir sem conexão no Moto G84 5G. As demais arquiteturas não foram testadas em aparelhos.
+
+Se o Flutter informar `Building with plugins requires symlink support`, é necessário habilitar o Modo de Desenvolvedor do Windows para permitir links simbólicos. Abra `ms-settings:developers` com `Win+R` e ative essa opção antes de repetir a compilação.
+
+O SQLite usa `%LOCALAPPDATA%\Streakly\poc.sqlite3` no Windows e `FLET_APP_STORAGE_DATA/poc.sqlite3` no Android (pasta privada de dados fornecida pelo Flet). Cada dispositivo tem seu próprio banco; ainda não há sincronização. O arquivo não deve ficar em cache nem ser incluído no APK.
+
+No celular, instale o APK, cadastre uma matéria, feche o aplicativo, ative o modo avião e reabra. A matéria deve continuar disponível. Repita após forçar a parada pelas configurações do Android. Não desinstale nem limpe os dados durante esse teste: essas ações removem normalmente o banco local.
 
 ## Princípios de desenvolvimento
 
