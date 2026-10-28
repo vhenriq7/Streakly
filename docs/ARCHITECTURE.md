@@ -66,7 +66,7 @@ Entidades candidatas:
 
 Adicionar `user_id` remoto para vincular todos os dados à conta, mesmo sendo de uso pessoal. Usar UUID para chaves criadas offline; timestamps em UTC e data de estudo calculada com política explícita de fuso local. Criar migrações versionadas.
 
-**Detalhes ainda a projetar:** representação de ciclos Pomodoro, tempos de foco versus intervalos, regras para assuntos renomeados/excluídos, snapshots de metas concluídas e definição de conflitos.
+**Detalhes ainda a projetar:** regras para assuntos renomeados/excluídos, snapshots de metas concluídas e definição de conflitos. A representação Pomodoro da PoC está descrita na seção 5.
 
 ## 5. Contagem confiável de tempo
 
@@ -83,11 +83,17 @@ Adicionar `user_id` remoto para vincular todos os dados à conta, mesmo sendo de
 
 Nesta PoC, tipo de estudo e assunto são textos na sessão; o catálogo relacional completo permanece no modelo candidato. A duração atravessando meia-noite é preservada, mas o rateio por dia para estatísticas/metas vem depois. O relógio do dispositivo precisa estar correto: transições anteriores ao último evento são recusadas; a detecção completa de mudanças de relógio permanece em aberto.
 
-**Pomodoro básico 0.3.0:** as fases são `focus` e `break`, com estados `running`, `paused` e `ready`. O esquema 3 adiciona `pomodoro_state` e `subject_timer_settings`, sem alterar os dados de sessões anteriores. Preferências por UUID da matéria são salvas junto de um início bem-sucedido; a sessão mantém seus próprios tempos. A interface oferece somente 25/5 e 50/10 nesta etapa. Configuração personalizada e pausa longa continuam previstas para depois.
+**Pomodoro básico 0.3.0:** as fases são `focus` e `break`, com estados `running`, `paused` e `ready`. O esquema 3 adiciona `pomodoro_state` e `subject_timer_settings`, sem alterar os dados de sessões anteriores. Preferências por UUID da matéria são salvas junto de um início bem-sucedido; a sessão mantém seus próprios tempos. Essa versão introduziu os presets 25/5 e 50/10.
 
 Os eventos de estudo descrevem somente o foco. A conclusão de foco grava `pause` no prazo exato e prepara a pausa em `ready`; a conclusão da pausa prepara o próximo foco em `ready`, sem somar estudo. Cada próxima fase exige `start_next_phase`. Pausar/retomar um intervalo modifica apenas seu estado e tempo restante. O `status` da sessão indica execução da fase (inclusive `running` durante um intervalo); o tempo de estudo vem dos eventos, usando `session_elapsed_seconds`.
 
 `refresh_active_session` consulta primeiro e só abre transação de escrita para consolidar um prazo vencido, relendo o estado sob `BEGIN IMMEDIATE`. As ações também consolidam o prazo dentro da própria transação. O cálculo puro limita o foco ao prazo mesmo antes dessa consolidação, cobrindo o período com o app fechado. O aviso de término nesta etapa aparece na interface; notificações do sistema serão tratadas separadamente.
+
+**Personalização e pausa longa 0.4.0:** o esquema 4 adiciona `long_break_seconds`, `cycles_until_long_break` e `preset` às preferências e ao estado da sessão. `pomodoro_state` também recebe `completed_focuses` e `is_long_break`; a pausa longa continua sendo uma fase `break`. Os presets têm duração longa de 900 segundos a cada 4 focos. A interface converte minutos inteiros positivos em segundos, e a persistência valida os valores antes da gravação. A identificação `custom` é preservada mesmo quando os tempos coincidem com um preset.
+
+O contador aumenta uma única vez ao consolidar um foco completo, na mesma transação do evento e da próxima fase. `completed_focuses % cycles_until_long_break == 0` escolhe a pausa longa. Pausas manuais, intervalos e finalização antecipada não completam focos. As configurações da sessão são uma cópia das preferências no início; mudar de modo para progressivo preserva os últimos parâmetros Pomodoro da matéria.
+
+A migração usa `ALTER TABLE`, preservando as colunas e os eventos anteriores. Para recuperar o contador do esquema 3, desconta da duração consolidada o progresso já gravado do foco atual e divide o restante pela duração de foco, com arredondamento para compensar frações de segundo. Pausas manuais não são contadas como ciclos. O estado e o tempo restante atuais são preservados, inclusive pausas antigas que continuam curtas. A migração inteira é transacional e sua repetição não altera o banco já atualizado.
 
 ## 6. Protocolo de sincronização
 
@@ -120,7 +126,7 @@ Evitar a regra simplista de “última escrita vence” para sessões e metas. O
 
 **Fluxo de validação combinado com o usuário:** usar Windows e testes automatizados no desenvolvimento cotidiano. A geração e instalação de APKs ficam reservadas a marcos maiores e às mudanças específicas do Android (permissões, notificações, segundo plano, armazenamento e empacotamento). Não exigir uma nova instalação no celular a cada funcionalidade; os critérios Android abaixo serão verificados nesses marcos.
 
-**Andamento:** a base 0.1.0 foi confirmada no Windows e no Moto G84 5G, incluindo cadastro e persistência offline. O cronômetro progressivo 0.2.0 teve 11 testes de domínio/persistência e integração da interface aprovados, e o usuário confirmou seu funcionamento no Windows em 28/10/2026. O APK 0.2.0 foi gerado e verificado. O Pomodoro básico 0.3.0 passou nos 23 testes de regressão/Pomodoro e na integração com controles Flet; falta a conferência do usuário na janela nativa. Esta etapa não gera APK. Configuração personalizada, pausa longa e notificações do sistema continuam pendentes. O teste Android segue nos marcos combinados.
+**Andamento:** a base 0.1.0 foi confirmada no Windows e no Moto G84 5G, incluindo cadastro e persistência offline. O cronômetro progressivo 0.2.0 teve 11 testes de domínio/persistência e integração da interface aprovados, e o usuário confirmou seu funcionamento no Windows em 28/10/2026. O APK 0.2.0 foi gerado e verificado. O Pomodoro básico 0.3.0 passou nos 23 testes de regressão/Pomodoro. A versão 0.4.0 acrescentou personalização e pausa longa, passando nos 29 testes de regressão, ciclos e migração. A integração usa controles Flet, SQLite temporário e relógio simulado, cobrindo configuração inválida, fases curta/longa, início manual, pausa/retomada, recuperação e preferências. Falta a conferência do usuário na janela nativa. Esta etapa não gera APK; notificações do sistema continuam pendentes. O teste Android segue nos marcos combinados.
 
 O Android reutiliza `main.py`, `storage.py` e `timer.py`, com `pyproject.toml` para empacotamento. O banco usa `FLET_APP_STORAGE_DATA`; no Windows, o caminho original em `%LOCALAPPDATA%\Streakly` foi mantido para preservar os dados já cadastrados. `build_android.py` contorna limitações de caminhos com acentos do Flet/Flutter/CMake nesta instalação Windows, usando uma cópia apenas do código em pasta auxiliar e o SDK em caminho sem acentos. Os detalhes de execução estão no README. Autenticação e sincronização continuam reservadas à etapa de nuvem.
 

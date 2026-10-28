@@ -66,16 +66,57 @@ async def main(page: ft.Page) -> None:
         options=[
             ft.DropdownOption(key="25/5", text="25 min foco / 5 min pausa"),
             ft.DropdownOption(key="50/10", text="50 min foco / 10 min pausa"),
+            ft.DropdownOption(key="custom", text="Personalizado"),
         ],
     )
+    focus_minutes = ft.TextField(label="Foco (minutos)", value="25", width=210,
+                                 keyboard_type=ft.KeyboardType.NUMBER)
+    break_minutes = ft.TextField(label="Pausa curta (minutos)", value="5", width=210,
+                                 keyboard_type=ft.KeyboardType.NUMBER)
+    long_break_minutes = ft.TextField(label="Pausa longa (minutos)", value="15", width=210,
+                                      keyboard_type=ft.KeyboardType.NUMBER)
+    cycles = ft.TextField(label="Focos até a pausa longa", value="4", width=210,
+                          keyboard_type=ft.KeyboardType.NUMBER)
+    custom_fields = (focus_minutes, break_minutes, long_break_minutes, cycles)
+    custom_panel = ft.Row(list(custom_fields), wrap=True, visible=False)
     elapsed = ft.Text("00:00:00", size=40, weight=ft.FontWeight.BOLD)
     study_total = ft.Text()
+    cycle_info = ft.Text()
     timer_status = ft.Text("Nenhuma sessão ativa.")
     session_details = ft.Text()
     timer_note = ft.Text()
 
     def read_state():
         return list_subject_options(), refresh_active_session()
+
+    def fill_pomodoro_fields(settings) -> None:
+        preset_choice.value = settings.preset
+        focus_minutes.value = str(settings.focus_seconds // 60)
+        break_minutes.value = str(settings.break_seconds // 60)
+        long_break_minutes.value = str(settings.long_break_seconds // 60)
+        cycles.value = str(settings.cycles_until_long_break)
+
+    def pomodoro_options() -> dict:
+        if preset_choice.value in POMODORO_PRESETS:
+            focus, pause = POMODORO_PRESETS[preset_choice.value]
+            return dict(focus_seconds=focus, break_seconds=pause,
+                        long_break_seconds=15 * 60, cycles_until_long_break=4,
+                        preset=preset_choice.value)
+        if preset_choice.value != "custom":
+            raise ValueError("Escolha um preset Pomodoro.")
+        values = []
+        for field in custom_fields:
+            try:
+                value = int((field.value or "").strip())
+            except ValueError:
+                raise ValueError(f"{field.label}: use um número inteiro maior que zero.") from None
+            if value <= 0:
+                raise ValueError(f"{field.label}: use um número inteiro maior que zero.")
+            values.append(value)
+        focus, pause, long_pause, count = values
+        return dict(focus_seconds=focus * 60, break_seconds=pause * 60,
+                    long_break_seconds=long_pause * 60, cycles_until_long_break=count,
+                    preset="custom")
 
     async def refresh_state() -> None:
         nonlocal session, subject_options, settings_subject, ready
@@ -95,11 +136,7 @@ async def main(page: ft.Page) -> None:
         if not active and subject_choice.value and settings_subject != subject_choice.value:
             settings = await asyncio.to_thread(get_subject_timer_settings, subject_choice.value)
             mode_choice.value = settings.mode
-            preset_choice.value = next(
-                (key for key, values in POMODORO_PRESETS.items()
-                 if values == (settings.focus_seconds, settings.break_seconds)),
-                "25/5",
-            )
+            fill_pomodoro_fields(settings)
             settings_subject = subject_choice.value
         session = active
         ready = True
@@ -107,11 +144,11 @@ async def main(page: ft.Page) -> None:
             if (not previous or previous.id != active.id or not previous.pomodoro
                     or previous.pomodoro.state != "ready"
                     or previous.pomodoro.phase != active.pomodoro.phase):
-                message.value = (
-                    "Foco concluído. Inicie a pausa quando quiser."
-                    if active.pomodoro.phase == "break"
-                    else "Pausa concluída. Inicie o próximo foco quando quiser."
-                )
+                if active.pomodoro.phase == "break":
+                    label = "pausa longa" if active.pomodoro.is_long_break else "pausa curta"
+                    message.value = f"Foco concluído. Inicie a {label} quando quiser."
+                else:
+                    message.value = "Pausa concluída. Inicie o próximo foco quando quiser."
 
     def render() -> None:
         active = session is not None
@@ -122,30 +159,31 @@ async def main(page: ft.Page) -> None:
             topic.value = session.topic or ""
             mode_choice.value = session.mode
             if session.pomodoro:
-                preset_choice.value = next(
-                    (key for key, values in POMODORO_PRESETS.items()
-                     if values == (session.pomodoro.focus_seconds, session.pomodoro.break_seconds)),
-                    None,
-                )
+                fill_pomodoro_fields(session.pomodoro)
         is_pomodoro = mode_choice.value == "pomodoro"
         phase = session.pomodoro if session else None
         waiting = phase is not None and phase.state == "ready"
 
         name_field.disabled = save_button.disabled = locked
-        for field in (subject_choice, study_type, topic, mode_choice, preset_choice):
+        for field in (subject_choice, study_type, topic, mode_choice, preset_choice, *custom_fields):
             field.disabled = locked or active
         preset_choice.visible = is_pomodoro
+        custom_panel.visible = is_pomodoro and preset_choice.value == "custom"
         start_button.disabled = locked or active or not subject_options
         pause_button.visible = active and (phase.state == "running" if phase else session.status == "running")
         resume_button.visible = active and (phase.state == "paused" if phase else session.status == "paused")
         next_button.visible = waiting
-        next_button.content = "Iniciar pausa" if phase and phase.phase == "break" else "Iniciar foco"
+        if phase and phase.phase == "break":
+            next_button.content = "Iniciar pausa longa" if phase.is_long_break else "Iniciar pausa"
+        else:
+            next_button.content = "Iniciar foco"
         finish_button.visible = active
         for button in (pause_button, resume_button, next_button, finish_button):
             button.disabled = locked
 
         now = datetime.now(UTC)
         study_total.visible = is_pomodoro
+        cycle_info.visible = is_pomodoro
         timer_note.value = (
             "Cada fase termina no horário previsto e aguarda seu comando para a próxima."
             if is_pomodoro else
@@ -159,7 +197,13 @@ async def main(page: ft.Page) -> None:
             if phase:
                 elapsed.value = format_duration(ceil(pomodoro_remaining_seconds(phase, now)))
                 study_total.value = f"Tempo de estudo nesta sessão: {format_duration(seconds)}"
-                label = "foco" if phase.phase == "focus" else "pausa"
+                label = "foco" if phase.phase == "focus" else (
+                    "pausa longa" if phase.is_long_break else "pausa curta"
+                )
+                cycle_info.value = (
+                    f"Focos concluídos nesta sessão: {phase.completed_focuses}. "
+                    f"Pausa longa a cada {phase.cycles_until_long_break} focos."
+                )
                 if waiting:
                     timer_status.value = f"Aguardando início manual: {label}"
                 elif phase.state == "paused":
@@ -170,7 +214,17 @@ async def main(page: ft.Page) -> None:
                 elapsed.value = format_duration(seconds)
                 timer_status.value = "Em andamento" if session.status == "running" else "Pausado"
         else:
-            focus, _ = POMODORO_PRESETS.get(preset_choice.value, POMODORO_PRESETS["25/5"])
+            focus = 0
+            if is_pomodoro:
+                try:
+                    options = pomodoro_options()
+                    focus = options["focus_seconds"]
+                    cycle_info.value = (
+                        f"Pausa longa de {options['long_break_seconds'] // 60} min "
+                        f"a cada {options['cycles_until_long_break']} focos completos."
+                    )
+                except ValueError:
+                    cycle_info.value = "Preencha os tempos e a quantidade de focos com inteiros positivos."
             elapsed.value = format_duration(focus if is_pomodoro else 0)
             study_total.value = "Tempo de estudo nesta sessão: 00:00:00"
             timer_status.value = "Pronto para iniciar o foco." if is_pomodoro else "Nenhuma sessão ativa."
@@ -267,8 +321,12 @@ async def main(page: ft.Page) -> None:
             return
         options = {"mode": mode_choice.value}
         if mode_choice.value == "pomodoro":
-            focus, pause = POMODORO_PRESETS.get(preset_choice.value, POMODORO_PRESETS["25/5"])
-            options.update(focus_seconds=focus, break_seconds=pause)
+            try:
+                options.update(pomodoro_options())
+            except ValueError as error:
+                message.value = str(error)
+                page.update()
+                return
         await perform(
             start_session, "Sessão iniciada.",
             subject_choice.value, study_type.value, topic.value, **options,
@@ -298,6 +356,8 @@ async def main(page: ft.Page) -> None:
     finish_button = ft.Button("Finalizar", on_click=finish)
     subject_choice.on_select = choose_subject
     mode_choice.on_select = preset_choice.on_select = choose_mode_or_preset
+    for field in custom_fields:
+        field.on_change = choose_mode_or_preset
 
     subjects_panel = ft.Column(
         [ft.Text("Minhas matérias", size=20), name_field, save_button, subjects],
@@ -306,8 +366,8 @@ async def main(page: ft.Page) -> None:
     timer_panel = ft.Column(
         [
             ft.Text("Sessão de estudo", size=20),
-            elapsed, timer_status, study_total, session_details,
-            subject_choice, study_type, topic, mode_choice, preset_choice,
+            elapsed, timer_status, study_total, cycle_info, session_details,
+            subject_choice, study_type, topic, mode_choice, preset_choice, custom_panel,
             ft.Row([start_button, pause_button, resume_button, next_button, finish_button], wrap=True),
             timer_note,
         ],

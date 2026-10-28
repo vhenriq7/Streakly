@@ -16,6 +16,9 @@ class TimerSettings:
     mode: str = "progressive"
     focus_seconds: int = 1500
     break_seconds: int = 300
+    long_break_seconds: int = 900
+    cycles_until_long_break: int = 4
+    preset: str = "25/5"
 
 
 @dataclass(frozen=True)
@@ -27,6 +30,11 @@ class PomodoroState:
     remaining_seconds: float
     started_at: datetime | None
     updated_at: datetime
+    long_break_seconds: int = 900
+    cycles_until_long_break: int = 4
+    completed_focuses: int = 0
+    is_long_break: bool = False
+    preset: str = "25/5"
 
 
 @dataclass(frozen=True)

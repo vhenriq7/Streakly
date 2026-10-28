@@ -15,7 +15,12 @@ from timer import (
 )
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
+
+NAMED_PRESETS = {
+    "25/5": (1500, 300, 900, 4),
+    "50/10": (3000, 600, 900, 4),
+}
 
 
 def database_path() -> Path:
@@ -128,6 +133,44 @@ def initialize_database() -> None:
                 """
             )
             connection.execute("PRAGMA user_version = 3")
+            version = 3
+
+        if version == 3:
+            long_break = "long_break_seconds INTEGER NOT NULL DEFAULT 900 CHECK (long_break_seconds > 0)"
+            cycles = "cycles_until_long_break INTEGER NOT NULL DEFAULT 4 CHECK (cycles_until_long_break > 0)"
+            preset = "preset TEXT NOT NULL DEFAULT '25/5' CHECK (preset IN ('25/5', '50/10', 'custom'))"
+            new_columns = {
+                "subject_timer_settings": (long_break, cycles, preset),
+                "pomodoro_state": (
+                    long_break, cycles,
+                    "completed_focuses INTEGER NOT NULL DEFAULT 0 CHECK (completed_focuses >= 0)",
+                    "is_long_break INTEGER NOT NULL DEFAULT 0 CHECK (is_long_break IN (0, 1))",
+                    preset,
+                ),
+            }
+            for table, columns in new_columns.items():
+                for definition in columns:
+                    connection.execute(f"ALTER TABLE {table} ADD COLUMN {definition}")
+                connection.execute(
+                    f"""
+                    UPDATE {table} SET preset = CASE
+                        WHEN focus_seconds = 1500 AND break_seconds = 300 THEN '25/5'
+                        WHEN focus_seconds = 3000 AND break_seconds = 600 THEN '50/10'
+                        ELSE 'custom' END
+                    """
+                )
+            # Retira o progresso já gravado do foco atual antes de contar ciclos.
+            # Pausas manuais também geram eventos pause, portanto não são contadas.
+            connection.execute(
+                """
+                UPDATE pomodoro_state SET completed_focuses = MAX(0, CAST(ROUND((
+                    (SELECT duration_seconds FROM sessions WHERE id = session_id)
+                    - CASE WHEN phase = 'focus'
+                        THEN focus_seconds - remaining_seconds ELSE 0 END
+                ) / focus_seconds) AS INTEGER))
+                """
+            )
+            connection.execute("PRAGMA user_version = 4")
 
 
 def add_subject(name: str) -> None:
@@ -155,7 +198,11 @@ def list_subject_options() -> list[tuple[str, str]]:
 
 def _read_subject_timer_settings(connection: sqlite3.Connection, subject_id: str) -> TimerSettings:
     row = connection.execute(
-        "SELECT mode, focus_seconds, break_seconds FROM subject_timer_settings WHERE subject_id = ?",
+        """
+        SELECT mode, focus_seconds, break_seconds, long_break_seconds,
+            cycles_until_long_break, preset
+        FROM subject_timer_settings WHERE subject_id = ?
+        """,
         (subject_id,),
     ).fetchone()
     return TimerSettings(**dict(row)) if row else TimerSettings()
@@ -180,6 +227,11 @@ def _read_pomodoro(connection: sqlite3.Connection, session_id: str) -> PomodoroS
         remaining_seconds=row["remaining_seconds"],
         started_at=datetime.fromisoformat(row["started_at"]) if row["started_at"] else None,
         updated_at=datetime.fromisoformat(row["updated_at"]),
+        long_break_seconds=row["long_break_seconds"],
+        cycles_until_long_break=row["cycles_until_long_break"],
+        completed_focuses=row["completed_focuses"],
+        is_long_break=bool(row["is_long_break"]),
+        preset=row["preset"],
     )
 
 
@@ -251,16 +303,19 @@ def _write_pomodoro(connection: sqlite3.Connection, session_id: str, phase: Pomo
         """
         INSERT INTO pomodoro_state
             (session_id, phase, state, focus_seconds, break_seconds,
-             remaining_seconds, started_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             remaining_seconds, started_at, updated_at, long_break_seconds,
+             cycles_until_long_break, completed_focuses, is_long_break, preset)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(session_id) DO UPDATE SET
             phase = excluded.phase, state = excluded.state,
             remaining_seconds = excluded.remaining_seconds,
-            started_at = excluded.started_at, updated_at = excluded.updated_at
+            started_at = excluded.started_at, updated_at = excluded.updated_at,
+            completed_focuses = excluded.completed_focuses, is_long_break = excluded.is_long_break
         """,
         (session_id, phase.phase, phase.state, phase.focus_seconds, phase.break_seconds,
          phase.remaining_seconds, phase.started_at.isoformat() if phase.started_at else None,
-         phase.updated_at.isoformat()),
+         phase.updated_at.isoformat(), phase.long_break_seconds, phase.cycles_until_long_break,
+         phase.completed_focuses, int(phase.is_long_break), phase.preset),
     )
 
 
@@ -292,6 +347,9 @@ def start_session(
     mode: str = "progressive",
     focus_seconds: int = 1500,
     break_seconds: int = 300,
+    long_break_seconds: int = 900,
+    cycles_until_long_break: int = 4,
+    preset: str | None = None,
 ) -> StudySession:
     if not isinstance(study_type, str) or not study_type.strip():
         raise ValueError("Escolha o tipo de estudo.")
@@ -301,10 +359,19 @@ def start_session(
     topic = (topic.strip() or None) if topic is not None else None
     if mode not in ("progressive", "pomodoro"):
         raise ValueError("Escolha um modo de cronômetro válido.")
-    if mode == "pomodoro" and any(
-        type(value) is not int or value <= 0 for value in (focus_seconds, break_seconds)
-    ):
-        raise ValueError("Os tempos de foco e pausa devem ser inteiros positivos.")
+    if mode == "pomodoro":
+        values = (focus_seconds, break_seconds, long_break_seconds, cycles_until_long_break)
+        if any(type(value) is not int or value <= 0 for value in values):
+            raise ValueError("Os tempos e a quantidade de ciclos devem ser inteiros positivos.")
+        if any(value > 2**63 - 1 for value in values):
+            raise ValueError("Os valores informados são altos demais.")
+        if preset is None:
+            preset = next((name for name, canonical in NAMED_PRESETS.items()
+                           if values == canonical), "custom")
+        if not isinstance(preset, str) or preset not in (*NAMED_PRESETS, "custom"):
+            raise ValueError("Escolha uma configuração Pomodoro válida.")
+        if preset in NAMED_PRESETS and values != NAMED_PRESETS[preset]:
+            raise ValueError("Os tempos informados não correspondem à configuração escolhida.")
 
     with _connection(write=True) as connection:
         if connection.execute(
@@ -314,11 +381,19 @@ def start_session(
         if not connection.execute("SELECT 1 FROM subjects WHERE id = ?", (subject_id,)).fetchone():
             raise ValueError("Escolha uma matéria cadastrada.")
         moment = as_utc(at if at is not None else datetime.now(UTC))
+        if mode == "pomodoro":
+            try:
+                moment + timedelta(seconds=max(focus_seconds, break_seconds, long_break_seconds))
+            except OverflowError:
+                raise ValueError("A duração informada é alta demais.") from None
         previous = _read_subject_timer_settings(connection, subject_id)
         settings = TimerSettings(
             mode,
             focus_seconds if mode == "pomodoro" else previous.focus_seconds,
             break_seconds if mode == "pomodoro" else previous.break_seconds,
+            long_break_seconds if mode == "pomodoro" else previous.long_break_seconds,
+            cycles_until_long_break if mode == "pomodoro" else previous.cycles_until_long_break,
+            preset if mode == "pomodoro" else previous.preset,
         )
         session_id = str(uuid4())
         connection.execute(
@@ -331,17 +406,25 @@ def start_session(
         _insert_event(connection, session_id, 0, SessionEvent("start", moment))
         connection.execute(
             """
-            INSERT INTO subject_timer_settings (subject_id, mode, focus_seconds, break_seconds)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO subject_timer_settings
+                (subject_id, mode, focus_seconds, break_seconds,
+                 long_break_seconds, cycles_until_long_break, preset)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(subject_id) DO UPDATE SET mode = excluded.mode,
-                focus_seconds = excluded.focus_seconds, break_seconds = excluded.break_seconds
+                focus_seconds = excluded.focus_seconds, break_seconds = excluded.break_seconds,
+                long_break_seconds = excluded.long_break_seconds,
+                cycles_until_long_break = excluded.cycles_until_long_break, preset = excluded.preset
             """,
-            (subject_id, settings.mode, settings.focus_seconds, settings.break_seconds),
+            (subject_id, settings.mode, settings.focus_seconds, settings.break_seconds,
+             settings.long_break_seconds, settings.cycles_until_long_break, settings.preset),
         )
         if mode == "pomodoro":
             _write_pomodoro(connection, session_id, PomodoroState(
                 "focus", "running", settings.focus_seconds, settings.break_seconds,
                 float(settings.focus_seconds), moment, moment,
+                long_break_seconds=settings.long_break_seconds,
+                cycles_until_long_break=settings.cycles_until_long_break,
+                preset=settings.preset,
             ))
         return _read_session(connection, session_id)
 
@@ -362,12 +445,17 @@ def _settle_expired(
     deadline = phase.started_at + timedelta(seconds=phase.remaining_seconds)
     if phase.phase == "focus":
         session = _with_event(connection, session, "pause", deadline)
-        next_phase, remaining = "break", phase.break_seconds
+        completed = phase.completed_focuses + 1
+        is_long = completed % phase.cycles_until_long_break == 0
+        next_phase = "break"
+        remaining = phase.long_break_seconds if is_long else phase.break_seconds
     else:
+        completed, is_long = phase.completed_focuses, False
         next_phase, remaining = "focus", phase.focus_seconds
     _write_pomodoro(connection, session.id, replace(
         phase, phase=next_phase, state="ready", remaining_seconds=float(remaining),
         started_at=None, updated_at=deadline,
+        completed_focuses=completed, is_long_break=is_long,
     ))
     return _save_session_status(connection, session, "paused", deadline)
 

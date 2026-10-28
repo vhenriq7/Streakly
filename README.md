@@ -2,7 +2,7 @@
 
 Aplicativo pessoal de acompanhamento de estudos para **Windows e Android**, com registro de tempo, Pomodoro, metas diárias, ofensivas (streaks), calendário e estatísticas. Projeto **offline-first**: os dados são gravados localmente e sincronizados com a nuvem quando houver conexão.
 
-> **Status:** prova de conceito. A base 0.1.0 foi validada no Windows e no Moto G84 5G, e o cronômetro progressivo 0.2.0 foi confirmado no Windows. A versão 0.3.0 acrescenta Pomodoro básico 25/5 e 50/10, com início manual de cada fase e preferências por matéria. Os 23 testes automatizados e a integração com controles Flet passaram; falta a conferência do usuário na janela do Windows. Configuração personalizada, pausa longa e notificações do sistema ficam para etapas seguintes. Android segue reservado aos marcos combinados.
+> **Status:** prova de conceito. A base 0.1.0 foi validada no Windows e no Moto G84 5G, e o cronômetro progressivo 0.2.0 foi confirmado no Windows. A versão 0.4.0 amplia o Pomodoro 0.3.0 com tempos personalizados e pausa longa a cada N focos completos, mantendo início manual e preferências por matéria. Os 29 testes automatizados e a integração com controles Flet passaram; falta a conferência do usuário na janela do Windows. Notificações do sistema ficam para uma etapa seguinte. Android segue reservado aos marcos combinados.
 
 ## Funcionalidades planejadas
 
@@ -106,6 +106,16 @@ A contagem principal mostra o tempo restante da fase; **Tempo de estudo nesta se
 Se o app for fechado durante uma fase, o horário previsto de término permanece salvo. Ao reabrir depois desse prazo, o foco é encerrado exatamente no limite e a próxima fase aguarda comando; nenhum ciclo começa sozinho. Se a contagem tiver sido pausada manualmente, o tempo restante fica congelado até retomar.
 
 O esquema 3 adiciona estado do Pomodoro e preferências por matéria, preservando matérias, sessões e eventos anteriores. Além das ações manuais, o banco registra a conclusão de uma fase quando o app observa o prazo vencido; o horário gravado é o prazo original. Os testes simulam a passagem do tempo para verificar ciclos completos sem aguardar 25 minutos. Esta etapa usa testes no Windows e não gera um novo APK.
+
+### Pomodoro personalizado e pausa longa — versão 0.4.0
+
+Em **Preset Pomodoro → Personalizado**, informe minutos inteiros positivos para foco, pausa curta e pausa longa, além da quantidade de focos até a pausa longa. Os presets 25/5 e 50/10 usam pausa longa de **15 minutos a cada 4 focos completos**; escolha Personalizado para alterar esses valores. A configuração é salva ao iniciar uma sessão com sucesso.
+
+Somente completar um foco aumenta o contador. Após cada múltiplo da quantidade escolhida, a próxima pausa será longa; nos demais casos, curta. **Iniciar pausa longa** continua sendo manual. O contador sobrevive ao fechamento do app e começa em zero em uma nova sessão. Pausas manuais, intervalos e espera não aumentam o contador nem o tempo de estudo.
+
+O esquema 4 acrescenta as configurações e o contador sem recriar sessões ou eventos. A migração recupera os focos completos das sessões antigas e mantém a fase e o tempo restante já salvos; uma pausa antiga em andamento ou aguardando início continua curta.
+
+Para conferir na janela do Windows, finalize a sessão anterior e escolha **Personalizado**: foco 1 minuto, pausa curta 1, pausa longa 2 e quantidade 2. Após o primeiro foco, inicie a pausa curta; após o segundo, deve aparecer **Iniciar pausa longa**, com 2 minutos de estudo acumulados. Feche e reabra durante a espera ou com a contagem pausada para conferir a recuperação. Os testes automatizados verificam esses mesmos ciclos com relógio simulado e bancos temporários. Nenhuma dependência nova ou APK é necessário nesta etapa.
 
 ## Princípios de desenvolvimento
 

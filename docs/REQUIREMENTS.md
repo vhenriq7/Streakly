@@ -26,6 +26,7 @@ Aplicativo pessoal de estudos para **Windows e Android**, com experiência simpl
 - Modos **progressivo** e **Pomodoro**, com último modo e configurações lembrados por matéria.
 - Progressivo: iniciar, pausar, retomar e finalizar; pausas não contam como estudo.
 - Pomodoro: presets **25 min foco / 5 min pausa**, **50/10** e valores personalizados para foco, pausa curta, pausa longa e ciclos até pausa longa.
+- **PoC 0.4.0:** a interface personalizada usa minutos inteiros positivos e uma quantidade inteira positiva de focos. Os presets usam pausa longa de 15 minutos a cada 4 focos; esses valores podem ser alterados em Personalizado. O contador considera somente focos completos, é persistido por sessão e reinicia em uma nova sessão. Cada múltiplo de N prepara uma pausa longa; as demais são curtas. A sessão mantém a configuração do início e as preferências da matéria são salvas somente em um início bem-sucedido.
 - Ao terminar uma fase, parar, notificar e **aguardar comando manual** para iniciar a próxima. Tempo de espera e intervalos não contam como estudo.
 - Somente **uma sessão ativa por vez**, incluindo pausada. Antes de iniciar outra, orientar a retomar ou finalizar a anterior.
 - Navegação entre telas não interrompe a sessão.
