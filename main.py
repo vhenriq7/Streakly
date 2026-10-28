@@ -1,20 +1,31 @@
 import asyncio
 import sqlite3
 from datetime import UTC, datetime
+from math import ceil
 
 import flet as ft
 
 from storage import (
     add_subject,
     finish_session,
-    get_active_session,
+    get_subject_timer_settings,
     initialize_database,
     list_subject_options,
     pause_session,
+    refresh_active_session,
     resume_session,
+    start_next_phase,
     start_session,
 )
-from timer import StudySession, elapsed_seconds, format_duration
+from timer import (
+    StudySession,
+    format_duration,
+    pomodoro_remaining_seconds,
+    session_elapsed_seconds,
+)
+
+
+POMODORO_PRESETS = {"25/5": (25 * 60, 5 * 60), "50/10": (50 * 60, 10 * 60)}
 
 
 async def main(page: ft.Page) -> None:
@@ -23,6 +34,7 @@ async def main(page: ft.Page) -> None:
 
     session: StudySession | None = None
     subject_options: list[tuple[str, str]] = []
+    settings_subject: str | None = None
     busy = False
     ready = False
     state_lock = asyncio.Lock()
@@ -36,22 +48,38 @@ async def main(page: ft.Page) -> None:
     )
     subject_choice = ft.Dropdown(label="Matéria")
     study_type = ft.Dropdown(
-        label="Tipo de estudo",
-        value="Leitura",
+        label="Tipo de estudo", value="Leitura",
         options=[ft.DropdownOption(key=name, text=name) for name in (
             "Leitura", "Aula", "Exercícios", "Revisão"
         )],
     )
     topic = ft.TextField(label="Assunto (opcional)", hint_text="Ex.: Funções")
+    mode_choice = ft.Dropdown(
+        label="Modo", value="progressive",
+        options=[
+            ft.DropdownOption(key="progressive", text="Progressivo"),
+            ft.DropdownOption(key="pomodoro", text="Pomodoro"),
+        ],
+    )
+    preset_choice = ft.Dropdown(
+        label="Preset Pomodoro", value="25/5",
+        options=[
+            ft.DropdownOption(key="25/5", text="25 min foco / 5 min pausa"),
+            ft.DropdownOption(key="50/10", text="50 min foco / 10 min pausa"),
+        ],
+    )
     elapsed = ft.Text("00:00:00", size=40, weight=ft.FontWeight.BOLD)
+    study_total = ft.Text()
     timer_status = ft.Text("Nenhuma sessão ativa.")
     session_details = ft.Text()
+    timer_note = ft.Text()
 
     def read_state():
-        return list_subject_options(), get_active_session()
+        return list_subject_options(), refresh_active_session()
 
     async def refresh_state() -> None:
-        nonlocal session, subject_options, ready
+        nonlocal session, subject_options, settings_subject, ready
+        previous = session
         choices, active = await asyncio.to_thread(read_state)
         if choices != subject_options:
             subject_options = choices
@@ -64,33 +92,88 @@ async def main(page: ft.Page) -> None:
             ]
         if subject_choice.value not in {subject_id for subject_id, _ in choices}:
             subject_choice.value = choices[0][0] if choices else None
+        if not active and subject_choice.value and settings_subject != subject_choice.value:
+            settings = await asyncio.to_thread(get_subject_timer_settings, subject_choice.value)
+            mode_choice.value = settings.mode
+            preset_choice.value = next(
+                (key for key, values in POMODORO_PRESETS.items()
+                 if values == (settings.focus_seconds, settings.break_seconds)),
+                "25/5",
+            )
+            settings_subject = subject_choice.value
         session = active
         ready = True
+        if active and active.pomodoro and active.pomodoro.state == "ready":
+            if (not previous or previous.id != active.id or not previous.pomodoro
+                    or previous.pomodoro.state != "ready"
+                    or previous.pomodoro.phase != active.pomodoro.phase):
+                message.value = (
+                    "Foco concluído. Inicie a pausa quando quiser."
+                    if active.pomodoro.phase == "break"
+                    else "Pausa concluída. Inicie o próximo foco quando quiser."
+                )
 
     def render() -> None:
         active = session is not None
         locked = busy or not ready
-        name_field.disabled = save_button.disabled = locked
-        for field in (subject_choice, study_type, topic):
-            field.disabled = locked or active
-        start_button.disabled = locked or active or not subject_options
-        pause_button.visible = active and session.status == "running"
-        resume_button.visible = active and session.status == "paused"
-        finish_button.visible = active
-        for button in (pause_button, resume_button, finish_button):
-            button.disabled = locked
         if session:
             subject_choice.value = session.subject_id
             study_type.value = session.study_type
             topic.value = session.topic or ""
-            elapsed.value = format_duration(elapsed_seconds(session.events, datetime.now(UTC)))
-            timer_status.value = "Em andamento" if session.status == "running" else "Pausado"
+            mode_choice.value = session.mode
+            if session.pomodoro:
+                preset_choice.value = next(
+                    (key for key, values in POMODORO_PRESETS.items()
+                     if values == (session.pomodoro.focus_seconds, session.pomodoro.break_seconds)),
+                    None,
+                )
+        is_pomodoro = mode_choice.value == "pomodoro"
+        phase = session.pomodoro if session else None
+        waiting = phase is not None and phase.state == "ready"
+
+        name_field.disabled = save_button.disabled = locked
+        for field in (subject_choice, study_type, topic, mode_choice, preset_choice):
+            field.disabled = locked or active
+        preset_choice.visible = is_pomodoro
+        start_button.disabled = locked or active or not subject_options
+        pause_button.visible = active and (phase.state == "running" if phase else session.status == "running")
+        resume_button.visible = active and (phase.state == "paused" if phase else session.status == "paused")
+        next_button.visible = waiting
+        next_button.content = "Iniciar pausa" if phase and phase.phase == "break" else "Iniciar foco"
+        finish_button.visible = active
+        for button in (pause_button, resume_button, next_button, finish_button):
+            button.disabled = locked
+
+        now = datetime.now(UTC)
+        study_total.visible = is_pomodoro
+        timer_note.value = (
+            "Cada fase termina no horário previsto e aguarda seu comando para a próxima."
+            if is_pomodoro else
+            "O tempo continua contando com o app fechado até você pausar ou finalizar."
+        )
+        if session:
             session_details.value = f"{session.subject_name} · {session.study_type}"
             if session.topic:
                 session_details.value += f" · {session.topic}"
+            seconds = session_elapsed_seconds(session, now)
+            if phase:
+                elapsed.value = format_duration(ceil(pomodoro_remaining_seconds(phase, now)))
+                study_total.value = f"Tempo de estudo nesta sessão: {format_duration(seconds)}"
+                label = "foco" if phase.phase == "focus" else "pausa"
+                if waiting:
+                    timer_status.value = f"Aguardando início manual: {label}"
+                elif phase.state == "paused":
+                    timer_status.value = f"Contagem interrompida: {label}"
+                else:
+                    timer_status.value = f"Em andamento: {label}"
+            else:
+                elapsed.value = format_duration(seconds)
+                timer_status.value = "Em andamento" if session.status == "running" else "Pausado"
         else:
-            elapsed.value = "00:00:00"
-            timer_status.value = "Nenhuma sessão ativa."
+            focus, _ = POMODORO_PRESETS.get(preset_choice.value, POMODORO_PRESETS["25/5"])
+            elapsed.value = format_duration(focus if is_pomodoro else 0)
+            study_total.value = "Tempo de estudo nesta sessão: 00:00:00"
+            timer_status.value = "Pronto para iniciar o foco." if is_pomodoro else "Nenhuma sessão ativa."
             session_details.value = "Escolha a matéria e o tipo de estudo para começar."
         page.update()
 
@@ -125,7 +208,27 @@ async def main(page: ft.Page) -> None:
                 busy = False
                 render()
 
-    async def perform(action, success_message: str, *args) -> None:
+    async def choose_subject(event) -> None:
+        nonlocal busy, settings_subject, ready
+        if busy or not ready or session:
+            return
+        busy = True
+        render()
+        async with state_lock:
+            try:
+                settings_subject = None
+                await refresh_state()
+            except (sqlite3.Error, OSError, ValueError):
+                ready = False
+                message.value = "Não foi possível carregar a configuração da matéria."
+            finally:
+                busy = False
+                render()
+
+    def choose_mode_or_preset(event) -> None:
+        render()
+
+    async def perform(action, success_message: str, *args, **kwargs) -> None:
         nonlocal busy, ready, session
         if busy or not ready:
             return
@@ -134,7 +237,7 @@ async def main(page: ft.Page) -> None:
         saved = False
         async with state_lock:
             try:
-                result = await asyncio.to_thread(action, *args)
+                result = await asyncio.to_thread(action, *args, **kwargs)
                 saved = True
                 session = result if result.status != "finished" else None
                 message.value = success_message
@@ -143,7 +246,6 @@ async def main(page: ft.Page) -> None:
                 await refresh_state()
             except ValueError as error:
                 message.value = str(error)
-                # Outra janela pode ter alterado a mesma sessão.
                 try:
                     await refresh_state()
                 except (sqlite3.Error, OSError, ValueError):
@@ -163,18 +265,26 @@ async def main(page: ft.Page) -> None:
             message.value = "Cadastre e escolha uma matéria para começar."
             page.update()
             return
+        options = {"mode": mode_choice.value}
+        if mode_choice.value == "pomodoro":
+            focus, pause = POMODORO_PRESETS.get(preset_choice.value, POMODORO_PRESETS["25/5"])
+            options.update(focus_seconds=focus, break_seconds=pause)
         await perform(
             start_session, "Sessão iniciada.",
-            subject_choice.value, study_type.value, topic.value,
+            subject_choice.value, study_type.value, topic.value, **options,
         )
 
     async def pause(event) -> None:
         if session:
-            await perform(pause_session, "Sessão pausada.", session.id)
+            await perform(pause_session, "Contagem pausada.", session.id)
 
     async def resume(event) -> None:
         if session:
-            await perform(resume_session, "Sessão retomada.", session.id)
+            await perform(resume_session, "Contagem retomada.", session.id)
+
+    async def next_phase(event) -> None:
+        if session:
+            await perform(start_next_phase, "Próxima fase iniciada.", session.id)
 
     async def finish(event) -> None:
         if session:
@@ -184,18 +294,22 @@ async def main(page: ft.Page) -> None:
     start_button = ft.Button("Iniciar", on_click=start)
     pause_button = ft.Button("Pausar", on_click=pause)
     resume_button = ft.Button("Retomar", on_click=resume)
+    next_button = ft.Button("Iniciar próxima fase", on_click=next_phase)
     finish_button = ft.Button("Finalizar", on_click=finish)
+    subject_choice.on_select = choose_subject
+    mode_choice.on_select = preset_choice.on_select = choose_mode_or_preset
+
     subjects_panel = ft.Column(
         [ft.Text("Minhas matérias", size=20), name_field, save_button, subjects],
         expand=True, horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
     )
     timer_panel = ft.Column(
         [
-            ft.Text("Cronômetro progressivo", size=20),
-            elapsed, timer_status, session_details,
-            subject_choice, study_type, topic,
-            ft.Row([start_button, pause_button, resume_button, finish_button], wrap=True),
-            ft.Text("O tempo continua contando com o app fechado até você pausar ou finalizar."),
+            ft.Text("Sessão de estudo", size=20),
+            elapsed, timer_status, study_total, session_details,
+            subject_choice, study_type, topic, mode_choice, preset_choice,
+            ft.Row([start_button, pause_button, resume_button, next_button, finish_button], wrap=True),
+            timer_note,
         ],
         expand=True, visible=False, scroll=ft.ScrollMode.AUTO,
         horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
@@ -238,13 +352,13 @@ async def main(page: ft.Page) -> None:
         return
     if session:
         subjects_panel.visible, timer_panel.visible = False, True
-        message.value = "Sessão em andamento recuperada." if session.status == "running" else "Sessão pausada recuperada."
+        if not session.pomodoro or session.pomodoro.state != "ready":
+            message.value = "Sessão recuperada com os horários salvos."
     render()
 
     async def update_timer() -> None:
         nonlocal ready
         while True:
-            # Quando o app fica oculto, apenas a atualização da tela espera.
             await page.wait_until_visible()
             if not busy:
                 async with state_lock:

@@ -2,7 +2,7 @@
 
 Aplicativo pessoal de acompanhamento de estudos para **Windows e Android**, com registro de tempo, Pomodoro, metas diárias, ofensivas (streaks), calendário e estatísticas. Projeto **offline-first**: os dados são gravados localmente e sincronizados com a nuvem quando houver conexão.
 
-> **Status:** prova de conceito. A base 0.1.0 foi validada no Windows e no Moto G84 5G. A versão 0.2.0 acrescenta cronômetro progressivo, recuperação da sessão e migração local preservando as matérias; testes automatizados passaram. A confirmação da nova interface e do cronômetro no aparelho ainda está pendente. Pomodoro e notificações seguem para etapas posteriores.
+> **Status:** prova de conceito. A base 0.1.0 foi validada no Windows e no Moto G84 5G, e o cronômetro progressivo 0.2.0 foi confirmado no Windows. A versão 0.3.0 acrescenta Pomodoro básico 25/5 e 50/10, com início manual de cada fase e preferências por matéria. Os 23 testes automatizados e a integração com controles Flet passaram; falta a conferência do usuário na janela do Windows. Configuração personalizada, pausa longa e notificações do sistema ficam para etapas seguintes. Android segue reservado aos marcos combinados.
 
 ## Funcionalidades planejadas
 
@@ -53,6 +53,8 @@ py -3.14 -m venv .venv
 
 Se a `.venv` já existe, pule o primeiro comando. `requirements.txt` instala as ferramentas de desenvolvimento no Windows. `pyproject.toml` define as dependências do aplicativo empacotado, sem o cliente desktop no Android.
 
+**Fluxo de testes combinado:** o desenvolvimento e a validação cotidiana serão feitos no Windows, executando `main.py` e os testes automatizados. Não gerar nem instalar um APK a cada mudança. Retomar os testes no Android em marcos maiores e nas mudanças que dependem da plataforma, como permissões, notificações, segundo plano, armazenamento e empacotamento.
+
 Para gerar o APK de teste:
 
 ```powershell
@@ -93,7 +95,17 @@ Para executar os testes, que usam apenas bancos temporários:
 
 Os testes cobrem recuperação em outro processo, pausas, sessão única, concorrência, rollback em falha, migração e duração atravessando meia-noite. A distribuição do tempo por dia para metas e estatísticas será implementada com essas funcionalidades. O cálculo depende da hora correta do dispositivo; transições anteriores ao último evento são recusadas, mas a política completa para alterações manuais do relógio ainda não foi implementada.
 
-Para validar no aparelho, atualize o APK existente, inicie uma sessão, alterne entre as duas telas, feche e reabra. Depois pause, feche novamente e confirme que o tempo permanece parado. Retome e finalize para conferir a duração sem as pausas. As sessões finalizadas ficam no banco; a tela de histórico ainda não faz parte desta etapa.
+Para validar o cronômetro agora, execute `main.py` no Windows, inicie uma sessão, alterne entre as duas telas, feche e reabra. Depois pause, feche novamente e confirme que o tempo permanece parado. Retome e finalize para conferir a duração sem as pausas. Nos marcos de validação Android, repetir esse roteiro atualizando o APK existente. As sessões finalizadas ficam no banco; a tela de histórico ainda não faz parte desta etapa.
+
+### Pomodoro básico — versão 0.3.0
+
+Em **Cronômetro**, escolha a matéria, o modo **Pomodoro** e um preset: **25 min foco / 5 min pausa** ou **50/10**. O último modo e preset efetivamente iniciados são lembrados por matéria. A sessão em andamento conserva sua configuração até ser finalizada.
+
+A contagem principal mostra o tempo restante da fase; **Tempo de estudo nesta sessão** soma somente os intervalos de foco. **Pausar** e **Retomar** funcionam durante foco ou pausa. Ao terminar a fase, o aplicativo mostra um aviso na tela e aguarda **Iniciar pausa** ou **Iniciar foco**. O período de espera e a pausa Pomodoro não contam como estudo. A sessão continua ocupando a única vaga de sessão ativa enquanto espera.
+
+Se o app for fechado durante uma fase, o horário previsto de término permanece salvo. Ao reabrir depois desse prazo, o foco é encerrado exatamente no limite e a próxima fase aguarda comando; nenhum ciclo começa sozinho. Se a contagem tiver sido pausada manualmente, o tempo restante fica congelado até retomar.
+
+O esquema 3 adiciona estado do Pomodoro e preferências por matéria, preservando matérias, sessões e eventos anteriores. Além das ações manuais, o banco registra a conclusão de uma fase quando o app observa o prazo vencido; o horário gravado é o prazo original. Os testes simulam a passagem do tempo para verificar ciclos completos sem aguardar 25 minutos. Esta etapa usa testes no Windows e não gera um novo APK.
 
 ## Princípios de desenvolvimento
 

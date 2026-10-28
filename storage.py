@@ -4,14 +4,18 @@ import os
 import sqlite3
 from collections.abc import Iterator
 from contextlib import closing, contextmanager
-from datetime import UTC, datetime
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
-from timer import SessionEvent, StudySession, as_utc, elapsed_seconds
+from timer import (
+    PomodoroState, SessionEvent, StudySession, TimerSettings,
+    as_utc, elapsed_seconds, pomodoro_remaining_seconds,
+)
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def database_path() -> Path:
@@ -94,6 +98,36 @@ def initialize_database() -> None:
                 """
             )
             connection.execute("PRAGMA user_version = 2")
+            version = 2
+
+        if version == 2:
+            connection.execute(
+                """
+                CREATE TABLE subject_timer_settings (
+                    subject_id TEXT PRIMARY KEY NOT NULL REFERENCES subjects(id),
+                    mode TEXT NOT NULL CHECK (mode IN ('progressive', 'pomodoro')),
+                    focus_seconds INTEGER NOT NULL CHECK (focus_seconds > 0),
+                    break_seconds INTEGER NOT NULL CHECK (break_seconds > 0)
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE pomodoro_state (
+                    session_id TEXT PRIMARY KEY NOT NULL REFERENCES sessions(id),
+                    phase TEXT NOT NULL CHECK (phase IN ('focus', 'break')),
+                    state TEXT NOT NULL CHECK (state IN ('running', 'paused', 'ready')),
+                    focus_seconds INTEGER NOT NULL CHECK (focus_seconds > 0),
+                    break_seconds INTEGER NOT NULL CHECK (break_seconds > 0),
+                    remaining_seconds REAL NOT NULL CHECK (remaining_seconds >= 0),
+                    started_at TEXT,
+                    updated_at TEXT NOT NULL,
+                    CHECK ((state = 'running' AND started_at IS NOT NULL)
+                        OR (state != 'running' AND started_at IS NULL))
+                )
+                """
+            )
+            connection.execute("PRAGMA user_version = 3")
 
 
 def add_subject(name: str) -> None:
@@ -117,6 +151,36 @@ def list_subject_options() -> list[tuple[str, str]]:
             "SELECT id, name FROM subjects ORDER BY name COLLATE NOCASE, id"
         ).fetchall()
     return [(row["id"], row["name"]) for row in rows]
+
+
+def _read_subject_timer_settings(connection: sqlite3.Connection, subject_id: str) -> TimerSettings:
+    row = connection.execute(
+        "SELECT mode, focus_seconds, break_seconds FROM subject_timer_settings WHERE subject_id = ?",
+        (subject_id,),
+    ).fetchone()
+    return TimerSettings(**dict(row)) if row else TimerSettings()
+
+
+def get_subject_timer_settings(subject_id: str) -> TimerSettings:
+    with _connection() as connection:
+        if not connection.execute("SELECT 1 FROM subjects WHERE id = ?", (subject_id,)).fetchone():
+            raise ValueError("Escolha uma matéria cadastrada.")
+        return _read_subject_timer_settings(connection, subject_id)
+
+
+def _read_pomodoro(connection: sqlite3.Connection, session_id: str) -> PomodoroState:
+    row = connection.execute(
+        "SELECT * FROM pomodoro_state WHERE session_id = ?", (session_id,)
+    ).fetchone()
+    if row is None:
+        raise ValueError("O estado do Pomodoro não foi encontrado.")
+    return PomodoroState(
+        phase=row["phase"], state=row["state"],
+        focus_seconds=row["focus_seconds"], break_seconds=row["break_seconds"],
+        remaining_seconds=row["remaining_seconds"],
+        started_at=datetime.fromisoformat(row["started_at"]) if row["started_at"] else None,
+        updated_at=datetime.fromisoformat(row["updated_at"]),
+    )
 
 
 def _read_session(connection: sqlite3.Connection, session_id: str) -> StudySession:
@@ -148,6 +212,8 @@ def _read_session(connection: sqlite3.Connection, session_id: str) -> StudySessi
             for event in events
         ),
         duration_seconds=row["duration_seconds"],
+        mode=row["mode"],
+        pomodoro=_read_pomodoro(connection, session_id) if row["mode"] == "pomodoro" else None,
     )
 
 
@@ -158,10 +224,14 @@ def get_session(session_id: str) -> StudySession:
 
 def get_active_session() -> StudySession | None:
     with _connection() as connection:
-        row = connection.execute(
-            "SELECT id FROM sessions WHERE status IN ('running', 'paused')"
-        ).fetchone()
-        return _read_session(connection, row["id"]) if row else None
+        return _read_active_session(connection)
+
+
+def _read_active_session(connection: sqlite3.Connection) -> StudySession | None:
+    row = connection.execute(
+        "SELECT id FROM sessions WHERE status IN ('running', 'paused')"
+    ).fetchone()
+    return _read_session(connection, row["id"]) if row else None
 
 
 def _insert_event(
@@ -176,12 +246,52 @@ def _insert_event(
     )
 
 
+def _write_pomodoro(connection: sqlite3.Connection, session_id: str, phase: PomodoroState) -> None:
+    connection.execute(
+        """
+        INSERT INTO pomodoro_state
+            (session_id, phase, state, focus_seconds, break_seconds,
+             remaining_seconds, started_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(session_id) DO UPDATE SET
+            phase = excluded.phase, state = excluded.state,
+            remaining_seconds = excluded.remaining_seconds,
+            started_at = excluded.started_at, updated_at = excluded.updated_at
+        """,
+        (session_id, phase.phase, phase.state, phase.focus_seconds, phase.break_seconds,
+         phase.remaining_seconds, phase.started_at.isoformat() if phase.started_at else None,
+         phase.updated_at.isoformat()),
+    )
+
+
+def _with_event(
+    connection: sqlite3.Connection, session: StudySession, kind: str, moment: datetime
+) -> StudySession:
+    event = SessionEvent(kind, moment)
+    _insert_event(connection, session.id, len(session.events), event)
+    return replace(session, events=(*session.events, event))
+
+
+def _save_session_status(
+    connection: sqlite3.Connection, session: StudySession, status: str, moment: datetime
+) -> StudySession:
+    duration = elapsed_seconds(session.events, moment)
+    connection.execute(
+        "UPDATE sessions SET status = ?, ended_at = ?, duration_seconds = ? WHERE id = ?",
+        (status, moment.isoformat() if status == "finished" else None, duration, session.id),
+    )
+    return _read_session(connection, session.id)
+
+
 def start_session(
     subject_id: str,
     study_type: str,
     topic: str | None = None,
     *,
     at: datetime | None = None,
+    mode: str = "progressive",
+    focus_seconds: int = 1500,
+    break_seconds: int = 300,
 ) -> StudySession:
     if not isinstance(study_type, str) or not study_type.strip():
         raise ValueError("Escolha o tipo de estudo.")
@@ -189,6 +299,12 @@ def start_session(
         raise ValueError("O assunto deve ser um texto.")
     study_type = study_type.strip()
     topic = (topic.strip() or None) if topic is not None else None
+    if mode not in ("progressive", "pomodoro"):
+        raise ValueError("Escolha um modo de cronômetro válido.")
+    if mode == "pomodoro" and any(
+        type(value) is not int or value <= 0 for value in (focus_seconds, break_seconds)
+    ):
+        raise ValueError("Os tempos de foco e pausa devem ser inteiros positivos.")
 
     with _connection(write=True) as connection:
         if connection.execute(
@@ -198,36 +314,135 @@ def start_session(
         if not connection.execute("SELECT 1 FROM subjects WHERE id = ?", (subject_id,)).fetchone():
             raise ValueError("Escolha uma matéria cadastrada.")
         moment = as_utc(at if at is not None else datetime.now(UTC))
+        previous = _read_subject_timer_settings(connection, subject_id)
+        settings = TimerSettings(
+            mode,
+            focus_seconds if mode == "pomodoro" else previous.focus_seconds,
+            break_seconds if mode == "pomodoro" else previous.break_seconds,
+        )
         session_id = str(uuid4())
         connection.execute(
             """
-            INSERT INTO sessions (id, subject_id, study_type, topic, status, started_at)
-            VALUES (?, ?, ?, ?, 'running', ?)
+            INSERT INTO sessions (id, subject_id, study_type, topic, status, started_at, mode)
+            VALUES (?, ?, ?, ?, 'running', ?, ?)
             """,
-            (session_id, subject_id, study_type, topic, moment.isoformat()),
+            (session_id, subject_id, study_type, topic, moment.isoformat(), mode),
         )
         _insert_event(connection, session_id, 0, SessionEvent("start", moment))
+        connection.execute(
+            """
+            INSERT INTO subject_timer_settings (subject_id, mode, focus_seconds, break_seconds)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(subject_id) DO UPDATE SET mode = excluded.mode,
+                focus_seconds = excluded.focus_seconds, break_seconds = excluded.break_seconds
+            """,
+            (subject_id, settings.mode, settings.focus_seconds, settings.break_seconds),
+        )
+        if mode == "pomodoro":
+            _write_pomodoro(connection, session_id, PomodoroState(
+                "focus", "running", settings.focus_seconds, settings.break_seconds,
+                float(settings.focus_seconds), moment, moment,
+            ))
         return _read_session(connection, session_id)
+
+
+def _phase_expired(session: StudySession, moment: datetime) -> bool:
+    phase = session.pomodoro
+    return (phase is not None and phase.state == "running" and phase.started_at is not None
+            and moment >= phase.started_at + timedelta(seconds=phase.remaining_seconds))
+
+
+def _settle_expired(
+    connection: sqlite3.Connection, session: StudySession, moment: datetime
+) -> StudySession:
+    if not _phase_expired(session, moment):
+        return session
+    phase = session.pomodoro
+    assert phase is not None and phase.started_at is not None
+    deadline = phase.started_at + timedelta(seconds=phase.remaining_seconds)
+    if phase.phase == "focus":
+        session = _with_event(connection, session, "pause", deadline)
+        next_phase, remaining = "break", phase.break_seconds
+    else:
+        next_phase, remaining = "focus", phase.focus_seconds
+    _write_pomodoro(connection, session.id, replace(
+        phase, phase=next_phase, state="ready", remaining_seconds=float(remaining),
+        started_at=None, updated_at=deadline,
+    ))
+    return _save_session_status(connection, session, "paused", deadline)
+
+
+def refresh_active_session(*, at: datetime | None = None) -> StudySession | None:
+    moment = as_utc(at if at is not None else datetime.now(UTC))
+    session = get_active_session()
+    if session is None or not _phase_expired(session, moment):
+        return session
+    with _connection(write=True) as connection:
+        # Outra janela pode ter consolidado ou finalizado a sessão nesse intervalo.
+        current = _read_active_session(connection)
+        return _settle_expired(connection, current, moment) if current else None
+
+
+def _pomodoro_transition(
+    connection: sqlite3.Connection, session: StudySession, kind: str, moment: datetime
+) -> StudySession:
+    phase = session.pomodoro
+    assert phase is not None
+    if moment < phase.updated_at:
+        raise ValueError("O relógio está anterior à última alteração do Pomodoro.")
+    session = _settle_expired(connection, session, moment)
+    phase = session.pomodoro
+    assert phase is not None
+
+    if kind == "finish":
+        session = _with_event(connection, session, "finish", moment)
+        next_state = replace(
+            phase, state="paused", remaining_seconds=pomodoro_remaining_seconds(phase, moment),
+            started_at=None, updated_at=moment,
+        )
+        status = "finished"
+    elif kind == "pause" and phase.state == "running":
+        if phase.phase == "focus":
+            session = _with_event(connection, session, "pause", moment)
+        next_state = replace(
+            phase, state="paused", remaining_seconds=pomodoro_remaining_seconds(phase, moment),
+            started_at=None, updated_at=moment,
+        )
+        status = "paused"
+    elif kind == "resume" and phase.state == "paused":
+        if phase.phase == "focus":
+            session = _with_event(connection, session, "resume", moment)
+        next_state = replace(phase, state="running", started_at=moment, updated_at=moment)
+        status = "running"
+    elif kind == "next" and phase.state == "ready":
+        if phase.phase == "focus":
+            session = _with_event(connection, session, "resume", moment)
+        next_state = replace(phase, state="running", started_at=moment, updated_at=moment)
+        status = "running"
+    else:
+        raise ValueError("Essa ação não é válida para a fase atual do Pomodoro.")
+    _write_pomodoro(connection, session.id, next_state)
+    return _save_session_status(connection, session, status, moment)
 
 
 def _transition(session_id: str, kind: str, *, at: datetime | None = None) -> StudySession:
     with _connection(write=True) as connection:
         session = _read_session(connection, session_id)
-        allowed = {"pause": ("running",), "resume": ("paused",), "finish": ("running", "paused")}
-        if session.status not in allowed[kind]:
-            raise ValueError("Essa ação não é válida para o estado atual da sessão.")
+        if session.status == "finished":
+            raise ValueError("Essa sessão já foi finalizada.")
         moment = as_utc(at if at is not None else datetime.now(UTC))
         if not session.events or moment < session.events[-1].occurred_at:
             raise ValueError("O relógio está anterior ao último evento da sessão. Confira a hora do dispositivo.")
-        event = SessionEvent(kind, moment)
-        duration = elapsed_seconds((*session.events, event), moment)
-        _insert_event(connection, session_id, len(session.events), event)
+        if session.mode == "pomodoro":
+            return _pomodoro_transition(connection, session, kind, moment)
+        if kind == "next":
+            raise ValueError("O cronômetro progressivo não tem próxima fase.")
+        allowed = {"pause": ("running",), "resume": ("paused",), "finish": ("running", "paused")}
+        if session.status not in allowed[kind]:
+            raise ValueError("Essa ação não é válida para o estado atual da sessão.")
+        session = _with_event(connection, session, kind, moment)
         status = {"pause": "paused", "resume": "running", "finish": "finished"}[kind]
-        connection.execute(
-            "UPDATE sessions SET status = ?, ended_at = ?, duration_seconds = ? WHERE id = ?",
-            (status, moment.isoformat() if kind == "finish" else None, duration, session_id),
-        )
-        return _read_session(connection, session_id)
+        return _save_session_status(connection, session, status, moment)
 
 
 def pause_session(session_id: str, *, at: datetime | None = None) -> StudySession:
@@ -240,3 +455,7 @@ def resume_session(session_id: str, *, at: datetime | None = None) -> StudySessi
 
 def finish_session(session_id: str, *, at: datetime | None = None) -> StudySession:
     return _transition(session_id, "finish", at=at)
+
+
+def start_next_phase(session_id: str, *, at: datetime | None = None) -> StudySession:
+    return _transition(session_id, "next", at=at)

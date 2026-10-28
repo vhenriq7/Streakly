@@ -83,6 +83,12 @@ Adicionar `user_id` remoto para vincular todos os dados à conta, mesmo sendo de
 
 Nesta PoC, tipo de estudo e assunto são textos na sessão; o catálogo relacional completo permanece no modelo candidato. A duração atravessando meia-noite é preservada, mas o rateio por dia para estatísticas/metas vem depois. O relógio do dispositivo precisa estar correto: transições anteriores ao último evento são recusadas; a detecção completa de mudanças de relógio permanece em aberto.
 
+**Pomodoro básico 0.3.0:** as fases são `focus` e `break`, com estados `running`, `paused` e `ready`. O esquema 3 adiciona `pomodoro_state` e `subject_timer_settings`, sem alterar os dados de sessões anteriores. Preferências por UUID da matéria são salvas junto de um início bem-sucedido; a sessão mantém seus próprios tempos. A interface oferece somente 25/5 e 50/10 nesta etapa. Configuração personalizada e pausa longa continuam previstas para depois.
+
+Os eventos de estudo descrevem somente o foco. A conclusão de foco grava `pause` no prazo exato e prepara a pausa em `ready`; a conclusão da pausa prepara o próximo foco em `ready`, sem somar estudo. Cada próxima fase exige `start_next_phase`. Pausar/retomar um intervalo modifica apenas seu estado e tempo restante. O `status` da sessão indica execução da fase (inclusive `running` durante um intervalo); o tempo de estudo vem dos eventos, usando `session_elapsed_seconds`.
+
+`refresh_active_session` consulta primeiro e só abre transação de escrita para consolidar um prazo vencido, relendo o estado sob `BEGIN IMMEDIATE`. As ações também consolidam o prazo dentro da própria transação. O cálculo puro limita o foco ao prazo mesmo antes dessa consolidação, cobrindo o período com o app fechado. O aviso de término nesta etapa aparece na interface; notificações do sistema serão tratadas separadamente.
+
 ## 6. Protocolo de sincronização
 
 1. Salvar alteração **em transação local**, junto com item na outbox.
@@ -112,7 +118,9 @@ Evitar a regra simplista de “última escrita vence” para sessões e metas. O
 
 ## 9. Prova de conceito obrigatória
 
-**Andamento:** a base 0.1.0 foi confirmada no Windows e no Moto G84 5G, incluindo cadastro e persistência offline. A versão 0.2.0 implementa o cronômetro progressivo com recuperação, pausas e sessão única. Os 11 testes de domínio/persistência e a integração da interface com controles Flet passaram. O APK 0.2.0 foi gerado e verificado, com o mesmo identificador e assinatura da base 0.1.0; o teste da nova versão no cliente nativo permanece pendente. Pomodoro e notificações ainda serão implementados e validados.
+**Fluxo de validação combinado com o usuário:** usar Windows e testes automatizados no desenvolvimento cotidiano. A geração e instalação de APKs ficam reservadas a marcos maiores e às mudanças específicas do Android (permissões, notificações, segundo plano, armazenamento e empacotamento). Não exigir uma nova instalação no celular a cada funcionalidade; os critérios Android abaixo serão verificados nesses marcos.
+
+**Andamento:** a base 0.1.0 foi confirmada no Windows e no Moto G84 5G, incluindo cadastro e persistência offline. O cronômetro progressivo 0.2.0 teve 11 testes de domínio/persistência e integração da interface aprovados, e o usuário confirmou seu funcionamento no Windows em 28/10/2026. O APK 0.2.0 foi gerado e verificado. O Pomodoro básico 0.3.0 passou nos 23 testes de regressão/Pomodoro e na integração com controles Flet; falta a conferência do usuário na janela nativa. Esta etapa não gera APK. Configuração personalizada, pausa longa e notificações do sistema continuam pendentes. O teste Android segue nos marcos combinados.
 
 O Android reutiliza `main.py`, `storage.py` e `timer.py`, com `pyproject.toml` para empacotamento. O banco usa `FLET_APP_STORAGE_DATA`; no Windows, o caminho original em `%LOCALAPPDATA%\Streakly` foi mantido para preservar os dados já cadastrados. `build_android.py` contorna limitações de caminhos com acentos do Flet/Flutter/CMake nesta instalação Windows, usando uma cópia apenas do código em pasta auxiliar e o SDK em caminho sem acentos. Os detalhes de execução estão no README. Autenticação e sincronização continuam reservadas à etapa de nuvem.
 
