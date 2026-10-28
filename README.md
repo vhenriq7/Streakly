@@ -2,7 +2,7 @@
 
 Aplicativo pessoal de acompanhamento de estudos para **Windows e Android**, com registro de tempo, Pomodoro, metas diárias, ofensivas (streaks), calendário e estatísticas. Projeto **offline-first**: os dados são gravados localmente e sincronizados com a nuvem quando houver conexão.
 
-> **Status:** prova de conceito. Janela Flet e cadastro local de matérias com SQLite validados no Windows e no Moto G84 5G, incluindo fechar/reabrir e uso offline no celular, conforme confirmação do usuário. APK Android 0.1.0 gerado e verificado. Retomada de cronômetro e notificações ainda dependem das próximas provas de viabilidade.
+> **Status:** prova de conceito. A base 0.1.0 foi validada no Windows e no Moto G84 5G. A versão 0.2.0 acrescenta cronômetro progressivo, recuperação da sessão e migração local preservando as matérias; testes automatizados passaram. A confirmação da nova interface e do cronômetro no aparelho ainda está pendente. Pomodoro e notificações seguem para etapas posteriores.
 
 ## Funcionalidades planejadas
 
@@ -59,7 +59,7 @@ Para gerar o APK de teste:
 .\.venv\Scripts\python.exe build_android.py
 ```
 
-Esse script executa `flet build apk`. Quando o caminho do repositório contém acentos, copia apenas `main.py`, `storage.py` e `pyproject.toml` para `%PUBLIC%\Documents\Streakly-Android-PoC\app`, evitando uma limitação do gerador nativo do Dart. O repositório, o banco e a `.venv` permanecem nos locais originais. Essa pasta auxiliar conserva os arquivos gerados para acelerar novas compilações; o APK final é copiado de volta para `build/apk/` no repositório.
+Esse script executa `flet build apk`. Quando o caminho do repositório contém acentos, copia apenas `main.py`, `storage.py`, `timer.py` e `pyproject.toml` para `%PUBLIC%\Documents\Streakly-Android-PoC\app`, evitando uma limitação do gerador nativo do Dart. O repositório, o banco e a `.venv` permanecem nos locais originais. Essa pasta auxiliar conserva os arquivos gerados para acelerar novas compilações; o APK final é copiado de volta para `build/apk/` no repositório.
 
 O cache dos pacotes Dart (`PUB_CACHE`) fica em `build/pub-cache` dentro da pasta efetiva de compilação, pois os plugins nativos também precisam de caminhos sem acentos. Esse ajuste vale apenas para os processos iniciados pelo script; não muda as variáveis permanentes do Windows.
 
@@ -69,13 +69,31 @@ Somente se ocorrer o erro conhecido de leitura do caminho do Flutter com acentos
 
 A primeira compilação baixa Flutter, JDK e Android SDK caso estejam ausentes; requer internet e espaço em disco. O APK é gerado em `build/apk/`. Não é necessário instalar Android Studio nem publicar na Play Store.
 
-O APK atual usa assinatura de teste. Foram verificados a integridade dos arquivos, a assinatura e a inclusão de SQLite nas três arquiteturas (`arm64-v8a`, `armeabi-v7a` e `x86_64`). Ele não contém o banco do Windows, ferramentas de desenvolvimento nem o script de compilação. Em 28/10/2026, o usuário confirmou instalação, execução e persistência após fechar/reabrir sem conexão no Moto G84 5G. As demais arquiteturas não foram testadas em aparelhos.
+O APK 0.2.0 foi gerado e usa a mesma assinatura de teste da versão 0.1.0, permitindo atualizar a instalação existente. Foram verificados a integridade dos arquivos, a assinatura, os três módulos Python e a inclusão de SQLite nas três arquiteturas (`arm64-v8a`, `armeabi-v7a` e `x86_64`). Ele não contém bancos, testes nem ferramentas de desenvolvimento. A versão 0.1.0 teve instalação, execução e persistência offline confirmadas pelo usuário no Moto G84 5G em 28/10/2026; o teste do cronômetro 0.2.0 no aparelho permanece pendente. As demais arquiteturas não foram testadas em aparelhos.
 
 Se o Flutter informar `Building with plugins requires symlink support`, é necessário habilitar o Modo de Desenvolvedor do Windows para permitir links simbólicos. Abra `ms-settings:developers` com `Win+R` e ative essa opção antes de repetir a compilação.
 
 O SQLite usa `%LOCALAPPDATA%\Streakly\poc.sqlite3` no Windows e `FLET_APP_STORAGE_DATA/poc.sqlite3` no Android (pasta privada de dados fornecida pelo Flet). Cada dispositivo tem seu próprio banco; ainda não há sincronização. O arquivo não deve ficar em cache nem ser incluído no APK.
 
 No celular, instale o APK, cadastre uma matéria, feche o aplicativo, ative o modo avião e reabra. A matéria deve continuar disponível. Repita após forçar a parada pelas configurações do Android. Não desinstale nem limpe os dados durante esse teste: essas ações removem normalmente o banco local.
+
+### Cronômetro progressivo — versão 0.2.0
+
+Em **Cronômetro**, escolha matéria, tipo de estudo e assunto opcional. Use **Iniciar**, **Pausar**, **Retomar** e **Finalizar**. A navegação para **Matérias** preserva a sessão. Uma sessão pausada também impede iniciar outra.
+
+Conforme escolha do usuário, fechar o app com uma sessão rodando mantém a contagem até pausar ou finalizar. Ao reabrir, o app recupera a mesma sessão pelos eventos UTC no SQLite. Se estiver pausada, o período fechado não conta. A tarefa de atualização da tela não precisa sobreviver ao fechamento.
+
+`timer.py` contém os modelos e o cálculo dos intervalos; `storage.py` grava eventos e estado juntos em transação; `main.py` cuida da interface. A tela atualiza a cada segundo enquanto visível, com consultas ao banco; as gravações ocorrem nas ações. A migração do esquema 1 para 2 adiciona tabelas e preserva as matérias existentes. Os tipos de estudo e o assunto ficam como texto nesta PoC; o catálogo completo e a interface de histórico serão tratados nas etapas seguintes.
+
+Para executar os testes, que usam apenas bancos temporários:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
+
+Os testes cobrem recuperação em outro processo, pausas, sessão única, concorrência, rollback em falha, migração e duração atravessando meia-noite. A distribuição do tempo por dia para metas e estatísticas será implementada com essas funcionalidades. O cálculo depende da hora correta do dispositivo; transições anteriores ao último evento são recusadas, mas a política completa para alterações manuais do relógio ainda não foi implementada.
+
+Para validar no aparelho, atualize o APK existente, inicie uma sessão, alterne entre as duas telas, feche e reabra. Depois pause, feche novamente e confirme que o tempo permanece parado. Retome e finalize para conferir a duração sem as pausas. As sessões finalizadas ficam no banco; a tela de histórico ainda não faz parte desta etapa.
 
 ## Princípios de desenvolvimento
 

@@ -61,7 +61,7 @@ def prepare_build_root() -> Path:
     if app.is_symlink() or app.is_junction() or (app.exists() and not app.is_dir()):
         raise RuntimeError("A pasta app de compilação não é um diretório comum.")
     app.mkdir(exist_ok=True)
-    sources = ("main.py", "storage.py", "pyproject.toml")
+    sources = ("main.py", "storage.py", "timer.py", "pyproject.toml")
     for name in sources:
         target = app / name
         if target.is_symlink() or (target.exists() and not target.is_file()):
@@ -141,7 +141,7 @@ def main() -> int:
     # O Flet precisa ter preparado o código e as dependências antes do Gradle.
     app = build / "python-app"
     site_packages = build / "site-packages"
-    for module in ("main", "storage"):
+    for module in ("main", "storage", "timer"):
         if not any((app / f"{module}.{suffix}").is_file() for suffix in ("py", "pyc")):
             raise RuntimeError(f"O Flet não preparou o módulo {module}; fallback cancelado.")
     if not all((site_packages / abi / "flet").is_dir() for abi in ABIS):

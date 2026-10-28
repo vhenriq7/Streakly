@@ -30,6 +30,7 @@ Aplicativo pessoal de estudos para **Windows e Android**, com experiência simpl
 - Somente **uma sessão ativa por vez**, incluindo pausada. Antes de iniciar outra, orientar a retomar ou finalizar a anterior.
 - Navegação entre telas não interrompe a sessão.
 - Persistir eventos e horários para reconstruir duração após encerramento ou falha; não depender apenas de contador em memória.
+- **Regra confirmada pelo usuário em 28/10/2026:** fechar o app com uma sessão progressiva rodando mantém a contagem até pausar ou finalizar, inclusive durante o período fechado. Ao reabrir, recuperar o estado e calcular esse intervalo pelos horários persistidos. Sessões pausadas permanecem pausadas, sem contabilizar o período fechado.
 - Dividir corretamente o tempo de uma sessão que atravessa meia-noite entre os dias locais correspondentes.
 - A execução em segundo plano no Android será validada em prova de conceito; não prometer comportamento impossível sob restrições do sistema.
 

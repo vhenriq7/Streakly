@@ -77,6 +77,12 @@ Adicionar `user_id` remoto para vincular todos os dados à conta, mesmo sendo de
 - Atualizar o acumulado diário em tela a partir das sessões registradas e do intervalo ativo.
 - **Sessão única local:** impedir duas sessões simultâneas no mesmo dispositivo; detectar possíveis sobreposições vindas de dispositivos offline diferentes.
 
+**Decisão da PoC 0.2.0:** por escolha do usuário, uma sessão progressiva rodando continua contando enquanto o app está fechado, até pausar ou finalizar. Uma sessão pausada conserva o tempo acumulado. A interface reconstrói a duração a partir dos eventos UTC, sem depender de execução em segundo plano. A tarefa assíncrona atualiza a tela somente enquanto visível e é cancelada ao desconectar/encerrar a página; isso não altera a sessão no banco.
+
+`timer.py` define os dados e soma intervalos; `storage.py` persiste sessões e eventos. O esquema 2 acrescenta as tabelas preservando as matérias do esquema 1. Um índice único parcial garante uma sessão ativa, inclusive pausada, e `BEGIN IMMEDIATE` serializa as transições. Cada ação grava evento, estado e duração acumulada na mesma transação. Os eventos têm UUID e sequência por sessão para ordenar ações com horários iguais. Versões futuras do banco são recusadas, sem rebaixar o esquema.
+
+Nesta PoC, tipo de estudo e assunto são textos na sessão; o catálogo relacional completo permanece no modelo candidato. A duração atravessando meia-noite é preservada, mas o rateio por dia para estatísticas/metas vem depois. O relógio do dispositivo precisa estar correto: transições anteriores ao último evento são recusadas; a detecção completa de mudanças de relógio permanece em aberto.
+
 ## 6. Protocolo de sincronização
 
 1. Salvar alteração **em transação local**, junto com item na outbox.
@@ -106,9 +112,9 @@ Evitar a regra simplista de “última escrita vence” para sessões e metas. O
 
 ## 9. Prova de conceito obrigatória
 
-**Andamento:** execução da janela e persistência SQLite após fechar/reabrir confirmadas no Windows. O APK Android 0.1.0 foi gerado e teve assinatura, integridade e presença de SQLite verificadas. Em 28/10/2026, o usuário confirmou instalação, execução e persistência offline após fechar/reabrir no Moto G84 5G. Essa validação cobre a janela e o cadastro local de matérias; retomada de cronômetro e notificações continuam pendentes.
+**Andamento:** a base 0.1.0 foi confirmada no Windows e no Moto G84 5G, incluindo cadastro e persistência offline. A versão 0.2.0 implementa o cronômetro progressivo com recuperação, pausas e sessão única. Os 11 testes de domínio/persistência e a integração da interface com controles Flet passaram. O APK 0.2.0 foi gerado e verificado, com o mesmo identificador e assinatura da base 0.1.0; o teste da nova versão no cliente nativo permanece pendente. Pomodoro e notificações ainda serão implementados e validados.
 
-O Android reutiliza `main.py` e `storage.py`, com `pyproject.toml` para empacotamento. O banco usa `FLET_APP_STORAGE_DATA`; no Windows, o caminho original em `%LOCALAPPDATA%\Streakly` foi mantido para preservar os dados já cadastrados. `build_android.py` contorna limitações de caminhos com acentos do Flet/Flutter/CMake nesta instalação Windows, usando uma cópia apenas do código em pasta auxiliar e o SDK em caminho sem acentos. Os detalhes de execução estão no README. Autenticação e sincronização continuam reservadas à etapa de nuvem.
+O Android reutiliza `main.py`, `storage.py` e `timer.py`, com `pyproject.toml` para empacotamento. O banco usa `FLET_APP_STORAGE_DATA`; no Windows, o caminho original em `%LOCALAPPDATA%\Streakly` foi mantido para preservar os dados já cadastrados. `build_android.py` contorna limitações de caminhos com acentos do Flet/Flutter/CMake nesta instalação Windows, usando uma cópia apenas do código em pasta auxiliar e o SDK em caminho sem acentos. Os detalhes de execução estão no README. Autenticação e sincronização continuam reservadas à etapa de nuvem.
 
 Antes do MVP completo:
 
