@@ -34,7 +34,7 @@ class SessionHistoryTests(TemporaryDatabaseTest):
     def test_empty_history_has_no_next_page(self):
         page = storage.read_session_history()
         self.assertEqual(page, storage.HistoryPage((), 0, False))
-        self.assertEqual(self.execute("PRAGMA user_version"), [(4,)])
+        self.assertEqual(self.execute("PRAGMA user_version"), [(5,)])
 
     def test_only_finished_sessions_are_listed(self):
         saved = self.finish_progressive()

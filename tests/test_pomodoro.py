@@ -350,7 +350,7 @@ with patch.object(storage, 'database_path', return_value=Path(sys.argv[1])):
                          [session.id, "break", "ready", 20, at(1020).isoformat(), 2, True, 7])
 
     def test_v2_migration_preserves_active_and_finished_progressive_sessions(self):
-        # As tabelas legadas têm o mesmo esquema; removemos apenas as adições v3.
+        # Retira as adições posteriores para reconstruir um banco v2 real.
         finished = storage.start_session(self.subjects["SQL"], "Aula", at=at(0))
         finished = storage.finish_session(finished.id, at=at(2))
         active = storage.start_session(self.subjects["Python"], "Leitura", at=at(3))
@@ -358,10 +358,11 @@ with patch.object(storage, 'database_path', return_value=Path(sys.argv[1])):
                   for table in ("subjects", "sessions", "session_events")}
         self.execute("DROP TABLE pomodoro_state")
         self.execute("DROP TABLE subject_timer_settings")
+        self.execute("ALTER TABLE sessions DROP COLUMN source")
         self.execute("PRAGMA user_version = 2")
         storage.initialize_database()
         storage.initialize_database()
-        self.assertEqual(self.execute("PRAGMA user_version"), [(4,)])
+        self.assertEqual(self.execute("PRAGMA user_version"), [(5,)])
         for table, rows in before.items():
             self.assertEqual(self.execute(f"SELECT * FROM {table} ORDER BY id"), rows)
         self.assertEqual(storage.get_session(finished.id), finished)
@@ -423,10 +424,11 @@ with patch.object(storage, 'database_path', return_value=Path(sys.argv[1])):
             self.execute(f"CREATE TABLE {table} ({definition})")
             self.execute(f"INSERT INTO {table} ({columns}) SELECT {columns} FROM {table}_fixture_v4")
             self.execute(f"DROP TABLE {table}_fixture_v4")
+        self.execute("ALTER TABLE sessions DROP COLUMN source")
         self.execute("PRAGMA user_version = 3")
         storage.initialize_database()
         storage.initialize_database()
-        self.assertEqual(self.execute("PRAGMA user_version"), [(4,)])
+        self.assertEqual(self.execute("PRAGMA user_version"), [(5,)])
         for table, rows in before.items():
             self.assertEqual(self.execute(f"SELECT * FROM {table} ORDER BY id"), rows)
         for table, (columns, _) in legacy_tables.items():

@@ -16,7 +16,7 @@ from timer import (
 )
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 NAMED_PRESETS = {
     "25/5": (1500, 300, 900, 4),
@@ -187,6 +187,16 @@ def initialize_database() -> None:
                 """
             )
             connection.execute("PRAGMA user_version = 4")
+            version = 4
+
+        if version == 4:
+            connection.execute(
+                """
+                ALTER TABLE sessions ADD COLUMN source TEXT NOT NULL DEFAULT 'timer'
+                CHECK (source IN ('timer', 'manual'))
+                """
+            )
+            connection.execute("PRAGMA user_version = 5")
 
 
 def add_subject(name: str) -> None:
@@ -282,6 +292,7 @@ def _read_session(connection: sqlite3.Connection, session_id: str) -> StudySessi
         duration_seconds=row["duration_seconds"],
         mode=row["mode"],
         pomodoro=_read_pomodoro(connection, session_id) if row["mode"] == "pomodoro" else None,
+        source=row["source"],
     )
 
 
@@ -404,6 +415,67 @@ def _save_session_status(
         (status, moment.isoformat() if status == "finished" else None, duration, session.id),
     )
     return _read_session(connection, session.id)
+
+
+def create_manual_session(
+    subject_id: str,
+    study_type: str,
+    started_at: datetime,
+    duration_seconds: int,
+    topic: str | None = None,
+    *,
+    at: datetime | None = None,
+) -> StudySession:
+    """Registra um período contínuo concluído, sem mudar cronômetros ou preferências."""
+    if not isinstance(subject_id, str) or not subject_id:
+        raise ValueError("Escolha uma matéria cadastrada.")
+    if not isinstance(study_type, str) or not study_type.strip():
+        raise ValueError("Escolha o tipo de estudo.")
+    if topic is not None and not isinstance(topic, str):
+        raise ValueError("O assunto deve ser um texto.")
+    if type(duration_seconds) is not int or duration_seconds <= 0:
+        raise ValueError("A duração deve ser um número inteiro positivo de segundos.")
+    study_type = study_type.strip()
+    topic = (topic.strip() or None) if topic is not None else None
+    try:
+        start = as_utc(started_at)
+        moment = as_utc(at if at is not None else datetime.now(UTC))
+        end = start + timedelta(seconds=duration_seconds)
+    except OverflowError:
+        raise ValueError("O período informado está fora do intervalo de datas permitido.") from None
+    if end > moment:
+        raise ValueError("O período de estudo precisa ter terminado até agora.")
+
+    with _connection(write=True) as connection:
+        if not connection.execute("SELECT 1 FROM subjects WHERE id = ?", (subject_id,)).fetchone():
+            raise ValueError("Escolha uma matéria cadastrada.")
+        candidates = connection.execute(
+            """
+            SELECT id FROM sessions
+            WHERE started_at < ? AND (ended_at IS NULL OR ended_at > ?)
+            """,
+            (end.isoformat(), start.isoformat()),
+        ).fetchall()
+        for row in candidates:
+            existing = _read_session(connection, row["id"])
+            # Pausas e espera não ocupam estudo; um foco ativo para no seu prazo.
+            if session_study_seconds_between(existing, start, end, moment) > 0:
+                raise ValueError("Já existe tempo de estudo registrado nesse período.")
+
+        session_id = str(uuid4())
+        connection.execute(
+            """
+            INSERT INTO sessions
+                (id, subject_id, study_type, topic, mode, status,
+                 started_at, ended_at, duration_seconds, source)
+            VALUES (?, ?, ?, ?, 'progressive', 'finished', ?, ?, ?, 'manual')
+            """,
+            (session_id, subject_id, study_type, topic,
+             start.isoformat(), end.isoformat(), duration_seconds),
+        )
+        _insert_event(connection, session_id, 0, SessionEvent("start", start))
+        _insert_event(connection, session_id, 1, SessionEvent("finish", end))
+        return _read_session(connection, session_id)
 
 
 def start_session(

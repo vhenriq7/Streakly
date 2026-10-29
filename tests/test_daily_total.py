@@ -147,7 +147,7 @@ class DailyStorageTests(TemporaryDatabaseTest):
         self.assertEqual(overview.total_seconds, 0)
         self.assertIsNone(overview.active_session)
         self.assertEqual(overview.subjects, tuple(storage.list_subject_options()))
-        self.assertEqual(self.execute("PRAGMA user_version"), [(4,)])
+        self.assertEqual(self.execute("PRAGMA user_version"), [(5,)])
         self.assertEqual(self.row_counts(), (0, 0))
 
     def test_finished_and_active_subjects_are_summed_once_and_pauses_do_not_count(self):

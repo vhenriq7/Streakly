@@ -2,7 +2,7 @@
 
 Aplicativo pessoal de acompanhamento de estudos para **Windows e Android**, com registro de tempo, Pomodoro, metas diárias, ofensivas (streaks), calendário e estatísticas. Projeto **offline-first**: os dados são gravados localmente e sincronizados com a nuvem quando houver conexão.
 
-> **Status:** início do MVP offline. A versão 0.7.0 acrescenta o **Histórico** de sessões finalizadas, com páginas de 25 registros, ao painel diário 0.6.0. Os 59 testes automatizados e a integração com controles Flet passaram; falta conferir a nova tela na janela do Windows. As provas de conceito anteriores validaram persistência no Windows/Android, cronômetro progressivo no Windows e exibição do aviso de foco concluído no Windows, este confirmado pelo usuário em 28/10/2026. Avisos Android e com o app fechado seguem pendentes, nos marcos combinados.
+> **Status:** início do MVP offline. A versão 0.8.0 acrescenta o cadastro manual pelo **Histórico**, usando data/hora de início e duração estudada, conforme escolha do usuário. Os 72 testes automatizados e a integração com controles Flet passaram; falta conferir o formulário na janela do Windows. As provas de conceito anteriores validaram persistência no Windows/Android, cronômetro progressivo no Windows e exibição do aviso de foco concluído no Windows, este confirmado pelo usuário em 28/10/2026. Avisos Android e com o app fechado seguem pendentes, nos marcos combinados.
 
 ## Funcionalidades planejadas
 
@@ -145,9 +145,21 @@ Em **Histórico**, consulte as sessões finalizadas, da data de início mais rec
 
 A lista carrega 25 sessões por página. Use **Mais antigas** e **Mais recentes** para navegar; **Atualizar** e reabrir a tela voltam à primeira página. A consulta ocorre apenas nessas ações, sem recarregar o histórico a cada segundo. Se outra instância finalizar uma sessão, use Atualizar para vê-la. Após erro de leitura, a lista e a posição anteriores são mantidas, com uma mensagem de erro.
 
-A consulta não grava dados nem altera a sessão ativa. Uma sessão rodando, pausada ou aguardando a próxima fase entra no histórico somente depois de **Finalizar**. A contagem e os avisos continuam funcionando enquanto você consulta a lista. O esquema permanece na versão 4, sem dependências novas nem APK nesta etapa. Criação, edição e exclusão manual ficam para etapas seguintes.
+A consulta não grava dados nem altera a sessão ativa. Uma sessão rodando, pausada ou aguardando a próxima fase entra no histórico somente depois de **Finalizar**. A contagem e os avisos continuam funcionando enquanto você consulta a lista. A etapa 0.7.0 manteve o esquema 4, sem dependências novas nem APK. O cadastro manual foi acrescentado na 0.8.0; edição e exclusão ficam para etapas seguintes.
 
 Para conferir no Windows, abra Histórico e verifique as sessões já salvas. Inicie uma sessão, pause e consulte a lista: ela ainda não deve aparecer. Finalize, reabra o Histórico e confira matéria, assunto e tempo de estudo. Feche e reabra o app para confirmar a persistência. Os 59 testes e a integração com controles Flet passaram; falta a conferência do usuário na janela nativa.
+
+### Cadastro manual — versão 0.8.0
+
+Em **Histórico → Adicionar sessão**, escolha matéria, tipo e assunto opcional. Informe a data como **DD/MM/AAAA**, o início como **HH:MM** e a duração estudada como **HH:MM** (por exemplo, 01:30 para uma hora e meia). O fim calculado aparece antes de salvar. Essa forma de entrada foi escolhida pelo usuário em 29/10/2026.
+
+Cada lançamento representa um período contínuo, sem pausas; registre blocos separados quando necessário. O início usa o fuso local do dispositivo e a duração é somada em UTC. O período deve ter terminado até agora. Horários locais inexistentes ou ambíguos e sobreposição com estudo já registrado são recusados. Intervalos adjacentes são permitidos; pausas e espera Pomodoro não ocupam tempo de estudo nessa verificação.
+
+Ao salvar, o registro já entra finalizado no Histórico como **Registro manual** e o total diário é atualizado, inclusive repartindo o período pela meia-noite. O cronômetro e as preferências por matéria são preservados. **Cancelar** descarta o formulário sem gravar; navegar entre telas preserva o preenchimento enquanto o app estiver aberto.
+
+O esquema 5 acrescenta a origem do registro e identifica as sessões anteriores como feitas pelo cronômetro, preservando dados e identificadores. Sessão e dois eventos são gravados juntos em transação. Os 72 testes e a integração com controles Flet passaram, incluindo falhas antes/depois da gravação e recusa de duplicação. Sem dependências novas ou APK nesta etapa; edição e exclusão continuam pendentes.
+
+Para conferir, registre um período passado que ainda não conste nos seus estudos, confira **Registro manual** no Histórico e o total em Início. Feche e reabra para confirmar a persistência. Falta essa conferência na janela nativa do Windows.
 
 ## Princípios de desenvolvimento
 

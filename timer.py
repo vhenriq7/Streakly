@@ -51,6 +51,7 @@ class StudySession:
     duration_seconds: float
     mode: str = "progressive"
     pomodoro: PomodoroState | None = None
+    source: str = "timer"
 
 
 def as_utc(moment: datetime) -> datetime:
