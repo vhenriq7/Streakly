@@ -129,6 +129,10 @@ O botão Excluir abre `AlertDialog` modal via `page.show_dialog`, com resumo do 
 
 A interface marca a exclusão como concluída antes de fechar o diálogo e atualizar o resumo. Uma falha anterior mantém erro e possibilidade de cancelar; falha posterior informa que a exclusão já ocorreu. Após sucesso, Histórico e total são atualizados e a lista retorna à primeira página. Não há lixeira ou desfazer nesta etapa.
 
+**Renomeação de matérias 0.11.0:** `rename_subject` relê o nome pelo UUID sob `BEGIN IMMEDIATE` e exige que ele corresponda exatamente ao nome carregado no formulário. A função valida o novo nome e atualiza somente `subjects.name`; nome inalterado não gera `UPDATE`. UUIDs, sessões, eventos e preferências permanecem intactos. As leituras relacionam sessões à matéria por UUID e passam a exibir o novo nome, sem mudar o tempo de estudo. Nomes duplicados não mesclam registros e o esquema permanece na versão 5.
+
+`main.py` preserva o rascunho ao navegar e bloqueia envio duplicado enquanto salva. Após sucesso, atualiza lista, atalhos, opções e sessão ativa, preservando os UUIDs selecionados, e recarrega a página atual do Histórico se ele já tiver sido consultado. Erro antes de gravar mantém o formulário; erro depois informa que o nome já mudou. Uma edição de sessão aberta anteriormente mantém seu snapshot e é recusada como desatualizada após renomear; cancelar e reabrir carrega os dados atuais. Conflitos de nome exigem cancelar a renomeação, conferir a lista e reabrir o formulário.
+
 ## 6. Protocolo de sincronização
 
 1. Salvar alteração **em transação local**, junto com item na outbox.
@@ -173,6 +177,8 @@ O Android reutiliza `main.py`, `storage.py`, `timer.py` e `notifications.py`, co
 **Edição 0.9.0:** os 84 testes passaram, incluindo precisão, preservação de eventos, atualização parcial do período, totais entre dias, conflitos, concorrência, rollback e reabertura. A integração com controles Flet e banco temporário verificou edição de classificação sem reinterpretar horários, preservação de pausas/ciclos, tipos existentes personalizados, erros antes/depois do commit, criação após edição, clique duplicado e navegação. Falta a conferência na janela nativa do Windows. Não foram usados dados pessoais, instaladas dependências ou gerados APKs.
 
 **Exclusão 0.10.0:** os 93 testes passaram, incluindo remoção das dependências, chaves estrangeiras, totais entre dias, proteção de estados ativos, conflitos, rollback, concorrência e reabertura. A integração com controles Flet e SQLite temporário verificou ausência de gravação antes de confirmar, Cancelar, fechamento, reconexão, callbacks antigos, falhas antes/depois da exclusão, clique duplicado e preservação do cronômetro. Falta conferir o diálogo nativo no Windows. Nenhum dado pessoal foi excluído, dependência instalada ou APK gerado nos testes.
+
+**Renomeação 0.11.0:** os 101 testes passaram, incluindo nomes duplicados, preservação dos vínculos, concorrência, rollback e reabertura em outro processo. A integração com controles Flet e SQLite temporário verificou cancelar, nome vazio, rascunhos, UUIDs selecionados, atualização da página atual do Histórico, conflitos, falhas antes/depois da gravação, clique duplicado e reabertura. Falta conferir o formulário na janela nativa do Windows. Não houve migração, dependências novas ou APK nesta etapa; o banco pessoal não foi usado nos testes.
 
 Antes do MVP completo:
 

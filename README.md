@@ -2,7 +2,7 @@
 
 Aplicativo pessoal de acompanhamento de estudos para **Windows e Android**, com registro de tempo, Pomodoro, metas diárias, ofensivas (streaks), calendário e estatísticas. Projeto **offline-first**: os dados são gravados localmente e sincronizados com a nuvem quando houver conexão.
 
-> **Status:** início do MVP offline. A versão 0.10.0 acrescenta exclusão de sessões finalizadas pelo **Histórico**, com confirmação dos dados e atualização do total diário. Os 93 testes automatizados e a integração com controles Flet passaram; falta conferir a confirmação na janela do Windows. As provas de conceito anteriores validaram persistência no Windows/Android, cronômetro progressivo no Windows e exibição do aviso de foco concluído no Windows, este confirmado pelo usuário em 28/10/2026. Avisos Android e com o app fechado seguem pendentes, nos marcos combinados.
+> **Status:** início do MVP offline. A versão 0.11.0 acrescenta renomeação de matérias, preservando histórico, cronômetro e preferências. Os 101 testes automatizados e a integração com controles Flet passaram; falta conferir o formulário na janela do Windows. As provas de conceito anteriores validaram persistência no Windows/Android, cronômetro progressivo no Windows e exibição do aviso de foco concluído no Windows, este confirmado pelo usuário em 28/10/2026. Avisos Android e com o app fechado seguem pendentes, nos marcos combinados.
 
 ## Funcionalidades planejadas
 
@@ -180,6 +180,14 @@ Registros manuais, progressivos e Pomodoro finalizados podem ser excluídos. Ses
 Uma falha antes da gravação mantém a confirmação com erro; falha ao atualizar a tela depois da exclusão informa que a sessão já foi excluída. Fechar uma confirmação ou desconectar antes de confirmar não executa a exclusão. A operação já confirmada pode terminar se o app for fechado durante a gravação.
 
 Os 93 testes e a integração com controles Flet passaram, incluindo cancelamento, conflitos, rollback e reconexão. O esquema permanece na versão 5; não há dependências novas nem APK. Para conferir no Windows, abra a confirmação e use primeiro Cancelar para verificar que a sessão permanece. Confirme a exclusão apenas em uma sessão que deseja remover e confira a lista e o total em Início. Falta essa conferência na janela nativa.
+
+### Renomear matérias — versão 0.11.0
+
+Em **Matérias → Renomear**, altere o nome e use **Salvar nome**. Espaços nas extremidades são removidos e nomes vazios são recusados. **Cancelar renomeação** não grava; navegar entre telas preserva o preenchimento. O novo nome aparece na lista, nos atalhos, nas opções de matéria, na sessão ativa e no Histórico já carregado, mantendo sua página. Nomes iguais continuam representando matérias separadas.
+
+A alteração preserva identificadores, sessões, eventos, tempo de estudo e preferências. Se outra instância tiver renomeado a matéria, a gravação é recusada: cancele, confira a lista atualizada e reabra Renomear. Uma edição de sessão aberta antes da renomeação também deve ser cancelada e reaberta para carregar os dados atuais. Erros antes de gravar mantêm o formulário; erros posteriores informam que o nome já foi alterado.
+
+O esquema permanece na versão 5, sem dependências novas ou APK. Os 101 testes automatizados e a integração com controles Flet passaram, usando bancos temporários. Para conferir no Windows, renomeie uma matéria com estudos, verifique o Histórico e o cronômetro, feche e reabra o app. Falta essa conferência na janela nativa. A exclusão de matérias fica para uma etapa posterior, após definir a política para seus vínculos.
 
 ## Princípios de desenvolvimento
 

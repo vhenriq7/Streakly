@@ -7,6 +7,7 @@ Aplicativo pessoal de estudos para **Windows e Android**, com experiência simpl
 ## 2. Matérias e classificação
 
 - Criar, renomear e excluir matérias.
+- **MVP 0.11.0:** renomear pelo identificador da matéria, preservando sessões, eventos, duração, preferências e sessão ativa. Remover espaços nas extremidades e recusar nome vazio; nomes iguais não unem matérias. Atualizar nomes na interface e no Histórico carregado, mantendo sua página. Cancelar não grava; recusar sobrescrever uma alteração de nome feita desde a leitura. Erro anterior à gravação mantém o formulário; erro posterior informa que a alteração já ocorreu. A exclusão de matérias permanece para etapa posterior à definição da política abaixo.
 - Criar e personalizar tipos de atividade por matéria ou catálogo reutilizável: **leitura, aula, exercícios, revisão** e outros.
 - Informar assunto/tópico opcional dentro de uma matéria (ex.: Python → laços → exercícios).
 - Cada sessão armazena matéria, tipo de estudo, assunto opcional, início, fim e duração efetiva.

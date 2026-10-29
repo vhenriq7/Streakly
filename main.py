@@ -21,6 +21,7 @@ from storage import (
     pause_session,
     read_session_history,
     read_study_overview,
+    rename_subject,
     resume_session,
     start_next_phase,
     start_session,
@@ -108,6 +109,8 @@ async def main(page: ft.Page) -> None:
     original_period_texts: tuple[str, str, str] | None = None
     delete_dialog: ft.AlertDialog | None = None
     delete_busy = False
+    renaming_subject: tuple[str, str] | None = None
+    rename_saving = False
     busy = False
     ready = False
     state_lock = asyncio.Lock()
@@ -119,6 +122,9 @@ async def main(page: ft.Page) -> None:
 
     message = ft.Text()
     name_field = ft.TextField(label="Nome da matéria", hint_text="Ex.: Python")
+    rename_name = ft.TextField(label="Novo nome da matéria")
+    rename_context = ft.Text()
+    rename_message = ft.Text()
     subjects = ft.ListView(
         controls=[ft.Text("Nenhuma matéria cadastrada ainda.")],
         expand=True, spacing=8,
@@ -229,6 +235,12 @@ async def main(page: ft.Page) -> None:
 
         return ft.TextButton(name, on_click=open_subject)
 
+    def subject_row(subject_id: str, name: str) -> ft.Row:
+        def choose_rename(event) -> None:
+            open_subject_rename(subject_id, name)
+
+        return ft.Row([ft.Text(name, expand=True), ft.TextButton("Renomear", on_click=choose_rename)])
+
     def fill_pomodoro_fields(settings) -> None:
         preset_choice.value = settings.preset
         focus_minutes.value = str(settings.focus_seconds // 60)
@@ -265,7 +277,7 @@ async def main(page: ft.Page) -> None:
         choices, active = list(overview.subjects), overview.active_session
         if choices != subject_options:
             subject_options = choices
-            subjects.controls = [ft.Text(name) for _, name in choices]
+            subjects.controls = [subject_row(key, name) for key, name in choices]
             home_subjects.controls = [subject_shortcut(key, name) for key, name in choices]
             if not choices:
                 subjects.controls = [ft.Text("Nenhuma matéria cadastrada ainda.")]
@@ -318,6 +330,17 @@ async def main(page: ft.Page) -> None:
         waiting = phase is not None and phase.state == "ready"
 
         name_field.disabled = save_button.disabled = locked
+        name_field.visible = save_button.visible = renaming_subject is None
+        rename_panel.visible = renaming_subject is not None
+        rename_name.disabled = locked or rename_saving
+        rename_save_button.disabled = locked or rename_saving or history_loading
+        rename_cancel_button.disabled = rename_saving
+        for row in subjects.controls:
+            if isinstance(row, ft.Row):
+                for control in row.controls:
+                    if isinstance(control, ft.TextButton):
+                        control.disabled = (locked or history_loading or renaming_subject is not None
+                                            or delete_dialog is not None)
         open_session_button.visible = active
         open_session_button.disabled = locked
         for shortcut in home_subjects.controls:
@@ -434,7 +457,7 @@ async def main(page: ft.Page) -> None:
 
     async def save_subject(event) -> None:
         nonlocal busy, ready
-        if busy or not ready:
+        if busy or not ready or renaming_subject is not None:
             return
         name = (name_field.value or "").strip()
         if not name:
@@ -462,6 +485,65 @@ async def main(page: ft.Page) -> None:
             finally:
                 busy = False
                 render()
+
+    def open_subject_rename(subject_id: str, name: str) -> None:
+        nonlocal renaming_subject
+        if (busy or not ready or rename_saving or renaming_subject is not None
+                or history_loading or delete_dialog is not None):
+            return
+        renaming_subject = (subject_id, name)
+        rename_context.value = f"Nome atual: {name}"
+        rename_name.value = name
+        rename_message.value = ""
+        render()
+
+    def cancel_subject_rename(event) -> None:
+        nonlocal renaming_subject
+        if not rename_saving:
+            renaming_subject = None
+            render()
+
+    async def save_subject_name(event) -> None:
+        nonlocal busy, ready, renaming_subject, rename_saving
+        if busy or not ready or rename_saving or history_loading or renaming_subject is None:
+            return
+        new_name = (rename_name.value or "").strip()
+        if not new_name:
+            rename_message.value = "Digite o novo nome da matéria."
+            render()
+            return
+        subject_id, expected_name = renaming_subject
+        busy = rename_saving = True
+        saved = False
+        render()
+        async with state_lock:
+            try:
+                await asyncio.to_thread(rename_subject, subject_id, expected_name, new_name)
+                saved = True
+                renaming_subject = None
+                message.value = f"Matéria renomeada para {new_name}."
+                await refresh_state()
+            except ValueError as error:
+                if saved:
+                    ready = False
+                    message.value = f"Nome alterado, mas a tela não pôde ser atualizada: {error}"
+                else:
+                    rename_message.value = str(error)
+                    try:
+                        await refresh_state()
+                    except (sqlite3.Error, OSError, ValueError):
+                        ready = False
+            except (sqlite3.Error, OSError):
+                if saved:
+                    ready = False
+                    message.value = "Nome alterado, mas a tela não pôde ser atualizada."
+                else:
+                    rename_message.value = "Não foi possível renomear a matéria. Tente novamente."
+            finally:
+                busy = rename_saving = False
+                render()
+        if saved and history_loaded:
+            await load_history(history_offset)
 
     async def choose_subject(event) -> None:
         nonlocal busy, settings_subject, ready
@@ -850,6 +932,8 @@ async def main(page: ft.Page) -> None:
             await load_history()
 
     save_button = ft.Button("Salvar matéria", on_click=save_subject)
+    rename_save_button = ft.Button("Salvar nome", on_click=save_subject_name)
+    rename_cancel_button = ft.TextButton("Cancelar renomeação", on_click=cancel_subject_rename)
     start_button = ft.Button("Iniciar", on_click=start)
     pause_button = ft.Button("Pausar", on_click=pause)
     resume_button = ft.Button("Retomar", on_click=resume)
@@ -870,8 +954,13 @@ async def main(page: ft.Page) -> None:
     for field in custom_fields:
         field.on_change = choose_mode_or_preset
 
+    rename_panel = ft.Column(
+        [ft.Text("Renomear matéria", size=20), rename_context, rename_name, rename_message,
+         ft.Row([rename_save_button, rename_cancel_button], wrap=True)],
+        visible=False, horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+    )
     subjects_panel = ft.Column(
-        [ft.Text("Minhas matérias", size=20), name_field, save_button, subjects],
+        [ft.Text("Minhas matérias", size=20), name_field, save_button, rename_panel, subjects],
         expand=True, visible=False, horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
     )
     home_panel = ft.Column(

@@ -210,6 +210,28 @@ def add_subject(name: str) -> None:
         )
 
 
+def rename_subject(subject_id: str, expected_name: str, new_name: str) -> None:
+    """Renomeia pelo UUID, recusando sobrescrever uma alteração concorrente."""
+    if not isinstance(subject_id, str) or not subject_id:
+        raise ValueError("Escolha uma matéria cadastrada.")
+    if not isinstance(expected_name, str) or not expected_name:
+        raise ValueError("Atualize a lista de matérias antes de renomear.")
+    if not isinstance(new_name, str) or not new_name.strip():
+        raise ValueError("O nome da matéria não pode estar vazio.")
+    name = new_name.strip()
+    with _connection(write=True) as connection:
+        row = connection.execute(
+            "SELECT name FROM subjects WHERE id = ?", (subject_id,),
+        ).fetchone()
+        if row is None:
+            raise ValueError("Escolha uma matéria cadastrada.")
+        if row["name"] != expected_name:
+            raise ValueError("A matéria foi alterada desde a leitura. Atualize a lista antes de renomear.")
+        if row["name"] == name:
+            return
+        connection.execute("UPDATE subjects SET name = ? WHERE id = ?", (name, subject_id))
+
+
 def list_subjects() -> list[str]:
     return [name for _, name in list_subject_options()]
 
