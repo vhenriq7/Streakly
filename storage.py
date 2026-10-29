@@ -478,6 +478,103 @@ def create_manual_session(
         return _read_session(connection, session_id)
 
 
+def update_finished_session(
+    expected: StudySession,
+    subject_id: str,
+    study_type: str,
+    topic: str | None = None,
+    *,
+    started_at: datetime | None = None,
+    duration_seconds: int | None = None,
+    at: datetime | None = None,
+) -> StudySession:
+    """Corrige uma sessão finalizada, recusando alterações sobre uma leitura antiga."""
+    if not isinstance(expected, StudySession):
+        raise ValueError("Escolha uma sessão finalizada para editar.")
+    if not isinstance(subject_id, str) or not subject_id:
+        raise ValueError("Escolha uma matéria cadastrada.")
+    if not isinstance(study_type, str) or not study_type.strip():
+        raise ValueError("Escolha o tipo de estudo.")
+    if topic is not None and not isinstance(topic, str):
+        raise ValueError("O assunto deve ser um texto.")
+    if duration_seconds is not None and (type(duration_seconds) is not int or duration_seconds <= 0):
+        raise ValueError("A duração deve ser um número inteiro positivo de segundos.")
+    try:
+        new_start = as_utc(started_at) if started_at is not None else None
+    except OverflowError:
+        raise ValueError("O período informado está fora do intervalo de datas permitido.") from None
+    timing_requested = started_at is not None or duration_seconds is not None
+    study_type = study_type.strip()
+    topic = (topic.strip() or None) if topic is not None else None
+
+    with _connection(write=True) as connection:
+        current = _read_session(connection, expected.id)
+        if current.status != "finished":
+            raise ValueError("Somente sessões finalizadas podem ser editadas.")
+        if current != expected:
+            raise ValueError("A sessão foi alterada desde a leitura. Atualize o Histórico antes de editar.")
+        if timing_requested and current.source != "manual":
+            raise ValueError("Os horários e as pausas registrados pelo cronômetro devem ser preservados.")
+        if not connection.execute("SELECT 1 FROM subjects WHERE id = ?", (subject_id,)).fetchone():
+            raise ValueError("Escolha uma matéria cadastrada.")
+
+        start = new_start if new_start is not None else current.started_at
+        duration = duration_seconds if duration_seconds is not None else current.duration_seconds
+        timing_changed = start != current.started_at or duration != current.duration_seconds
+        if timing_changed:
+            event_rows = connection.execute(
+                "SELECT sequence, kind FROM session_events WHERE session_id = ? ORDER BY sequence",
+                (current.id,),
+            ).fetchall()
+            if (current.source != "manual" or current.mode != "progressive"
+                    or current.pomodoro is not None
+                    or [(row["sequence"], row["kind"]) for row in event_rows]
+                    != [(0, "start"), (1, "finish")]):
+                raise ValueError("A estrutura desta sessão não permite alterar o período de estudo.")
+            try:
+                start = as_utc(start)
+                moment = as_utc(at if at is not None else datetime.now(UTC))
+                end = start + timedelta(seconds=duration)
+            except OverflowError:
+                raise ValueError("O período informado está fora do intervalo de datas permitido.") from None
+            if end > moment:
+                raise ValueError("O período de estudo precisa ter terminado até agora.")
+            candidates = connection.execute(
+                """
+                SELECT id FROM sessions
+                WHERE id != ? AND started_at < ? AND (ended_at IS NULL OR ended_at > ?)
+                """,
+                (current.id, end.isoformat(), start.isoformat()),
+            ).fetchall()
+            for row in candidates:
+                existing = _read_session(connection, row["id"])
+                if session_study_seconds_between(existing, start, end, moment) > 0:
+                    raise ValueError("Já existe tempo de estudo registrado nesse período.")
+
+            # Mantém os UUIDs dos eventos, alterando apenas os dois instantes.
+            connection.execute(
+                "UPDATE session_events SET occurred_at = ? WHERE session_id = ? AND sequence = 0",
+                (start.isoformat(), current.id),
+            )
+            connection.execute(
+                "UPDATE session_events SET occurred_at = ? WHERE session_id = ? AND sequence = 1",
+                (end.isoformat(), current.id),
+            )
+            connection.execute(
+                """
+                UPDATE sessions SET subject_id = ?, study_type = ?, topic = ?,
+                    started_at = ?, ended_at = ?, duration_seconds = ? WHERE id = ?
+                """,
+                (subject_id, study_type, topic, start.isoformat(), end.isoformat(), duration, current.id),
+            )
+        else:
+            connection.execute(
+                "UPDATE sessions SET subject_id = ?, study_type = ?, topic = ? WHERE id = ?",
+                (subject_id, study_type, topic, current.id),
+            )
+        return _read_session(connection, current.id)
+
+
 def start_session(
     subject_id: str,
     study_type: str,

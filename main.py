@@ -23,6 +23,7 @@ from storage import (
     resume_session,
     start_next_phase,
     start_session,
+    update_finished_session,
 )
 from timer import (
     StudySession,
@@ -37,8 +38,8 @@ HISTORY_PAGE_SIZE = 25
 STUDY_TYPES = ("Leitura", "Aula", "Exercícios", "Revisão")
 
 
-def parse_manual_period(date_text: str, time_text: str, duration_text: str) -> tuple[datetime, int]:
-    """Converte início local e duração HH:MM em um instante UTC e segundos."""
+def parse_local_start(date_text: str, time_text: str) -> datetime:
+    """Interpreta uma data/hora local sem escolher silenciosamente um fuso ambíguo."""
     try:
         local_start = datetime.strptime(f"{date_text.strip()} {time_text.strip()}", "%d/%m/%Y %H:%M")
     except ValueError:
@@ -57,8 +58,11 @@ def parse_manual_period(date_text: str, time_text: str, duration_text: str) -> t
         raise ValueError("Esse horário não existe no fuso local. Confira o início informado.")
     if len(candidates) > 1:
         raise ValueError("Esse horário se repete no fuso local. Informe um início sem ambiguidade.")
-    start = candidates.pop()
+    return candidates.pop()
 
+
+def parse_study_duration(duration_text: str) -> int:
+    """Converte uma duração positiva HH:MM em segundos."""
     parts = duration_text.strip().split(":")
     if (len(parts) != 2 or len(parts[1]) != 2
             or not all(part.isascii() and part.isdigit() for part in parts)):
@@ -70,6 +74,13 @@ def parse_manual_period(date_text: str, time_text: str, duration_text: str) -> t
             raise ValueError
     except ValueError:
         raise ValueError("A duração deve ser positiva, com minutos entre 00 e 59.") from None
+    return seconds
+
+
+def parse_manual_period(date_text: str, time_text: str, duration_text: str) -> tuple[datetime, int]:
+    """Converte início local e duração HH:MM em um instante UTC e segundos."""
+    start = parse_local_start(date_text, time_text)
+    seconds = parse_study_duration(duration_text)
     try:
         start + timedelta(seconds=seconds)
     except OverflowError:
@@ -92,6 +103,8 @@ async def main(page: ft.Page) -> None:
     history_loading = False
     manual_open = False
     manual_saving = False
+    editing_session: StudySession | None = None
+    original_period_texts: tuple[str, str, str] | None = None
     busy = False
     ready = False
     state_lock = asyncio.Lock()
@@ -117,17 +130,19 @@ async def main(page: ft.Page) -> None:
     history_status = ft.Text("Abra o histórico para consultar as sessões finalizadas.")
     history_page_label = ft.Text()
     history_list = ft.ListView(expand=True, spacing=16)
-    manual_subject = ft.Dropdown(label="Matéria do registro manual")
+    manual_subject = ft.Dropdown(label="Matéria da sessão no histórico")
     manual_study_type = ft.Dropdown(
-        label="Tipo de estudo do registro manual", value="Leitura",
+        label="Tipo de estudo da sessão no histórico", value="Leitura",
         options=[ft.DropdownOption(key=name, text=name) for name in STUDY_TYPES],
     )
-    manual_topic = ft.TextField(label="Assunto do registro manual (opcional)")
+    manual_topic = ft.TextField(label="Assunto da sessão no histórico (opcional)")
     manual_date = ft.TextField(label="Data de início (DD/MM/AAAA)", width=230)
     manual_time = ft.TextField(label="Horário de início (HH:MM)", width=230)
     manual_duration = ft.TextField(label="Duração estudada (HH:MM)", value="00:30", width=230)
     manual_message = ft.Text()
     manual_end = ft.Text()
+    manual_title = ft.Text("Adicionar sessão manual", size=20)
+    manual_hint = ft.Text()
     subject_choice = ft.Dropdown(label="Matéria")
     study_type = ft.Dropdown(
         label="Tipo de estudo", value="Leitura",
@@ -307,19 +322,35 @@ async def main(page: ft.Page) -> None:
         daily_date.value = today.strftime("%d/%m/%Y") if today else ""
         daily_total.value = format_duration(today_seconds) if ready else "Total indisponível"
         history_locked = locked or history_loading
+        timing_editable = editing_session is None or editing_session.source == "manual"
         history_nav_button.disabled = history_loading or manual_saving
         manual_open_button.disabled = history_locked or not subject_options
         manual_save_button.disabled = locked or manual_saving or not subject_options
         manual_cancel_button.disabled = manual_saving
+        manual_save_button.content = "Salvar alterações" if editing_session else "Salvar registro manual"
+        manual_title.value = "Editar sessão" if editing_session else "Adicionar sessão manual"
+        manual_timing_row.visible = timing_editable
+        manual_hint.value = (
+            "Informe apenas o tempo estudado. Cada registro representa um período contínuo, sem pausas."
+            if timing_editable else
+            "Os horários e as pausas registrados pelo cronômetro serão preservados."
+        )
         for field in (manual_subject, manual_study_type, manual_topic,
                       manual_date, manual_time, manual_duration):
             field.disabled = locked or manual_saving
+        for field in (manual_date, manual_time, manual_duration):
+            field.disabled = locked or manual_saving or not timing_editable
         manual_panel.visible = manual_open
         history_toolbar.visible = not manual_open
         history_list.visible = not manual_open
         history_refresh_button.disabled = history_locked
         history_previous_button.disabled = history_locked or not history_loaded or history_offset == 0
         history_next_button.disabled = history_locked or not history_loaded or not history_has_more
+        for row in history_list.controls:
+            if isinstance(row, ft.Column):
+                for control in row.controls:
+                    if isinstance(control, ft.TextButton):
+                        control.disabled = history_locked or manual_saving
         for field in (subject_choice, study_type, topic, mode_choice, preset_choice, *custom_fields):
             field.disabled = locked or active
         preset_choice.visible = is_pomodoro
@@ -526,7 +557,11 @@ async def main(page: ft.Page) -> None:
         ]
         if record.topic:
             details.append(ft.Text(f"Assunto: {record.topic}"))
-        details.extend([ft.Text(f"Início: {start}"), ft.Text(f"Fim: {end}"), ft.Divider()])
+        def edit_record(event) -> None:
+            open_edit(record)
+
+        details.extend([ft.Text(f"Início: {start}"), ft.Text(f"Fim: {end}"),
+                        ft.TextButton("Editar", on_click=edit_record), ft.Divider()])
         return ft.Column(details, spacing=4, horizontal_alignment=ft.CrossAxisAlignment.STRETCH)
 
     async def load_history(offset: int = 0) -> None:
@@ -568,49 +603,102 @@ async def main(page: ft.Page) -> None:
     async def next_history_page(event) -> None:
         await load_history(history_offset + HISTORY_PAGE_SIZE)
 
+    def form_period() -> tuple[datetime, float]:
+        if editing_session and original_period_texts:
+            original_date, original_time, original_duration = original_period_texts
+            start = editing_session.started_at
+            seconds = editing_session.duration_seconds
+            if (manual_date.value, manual_time.value) != (original_date, original_time):
+                start = parse_local_start(manual_date.value or "", manual_time.value or "")
+            if manual_duration.value != original_duration:
+                seconds = parse_study_duration(manual_duration.value or "")
+            return start, seconds
+        return parse_manual_period(
+            manual_date.value or "", manual_time.value or "", manual_duration.value or "",
+        )
+
     def preview_manual_end(event=None) -> None:
-        try:
-            start, seconds = parse_manual_period(
-                manual_date.value or "", manual_time.value or "", manual_duration.value or "",
+        if editing_session and editing_session.source != "manual":
+            start = editing_session.started_at.astimezone()
+            end = editing_session.ended_at.astimezone()
+            manual_end.value = (
+                f"Período registrado: {start:%d/%m/%Y %H:%M:%S (%z)} "
+                f"até {end:%d/%m/%Y %H:%M:%S (%z)}. "
+                f"Estudo efetivo: {format_duration(editing_session.duration_seconds)}."
             )
+            render()
+            return
+        try:
+            start, seconds = form_period()
             end = (start + timedelta(seconds=seconds)).astimezone()
-            manual_end.value = f"Fim calculado: {end:%d/%m/%Y %H:%M (%z)}"
-        except ValueError:
+            manual_end.value = f"Fim calculado: {end:%d/%m/%Y %H:%M:%S (%z)}"
+        except (ValueError, OverflowError):
             manual_end.value = "Preencha o início e a duração para conferir o fim calculado."
         render()
 
     def open_manual(event) -> None:
-        nonlocal manual_open
+        nonlocal manual_open, editing_session, original_period_texts
         if busy or not ready or manual_saving:
             return
         start = (datetime.now(UTC) - timedelta(minutes=30)).astimezone()
         manual_date.value, manual_time.value = start.strftime("%d/%m/%Y"), start.strftime("%H:%M")
         manual_duration.value = "00:30"
+        editing_session, original_period_texts = None, None
         manual_subject.value = subject_choice.value
         manual_study_type.value = "Leitura"
+        manual_study_type.options = [ft.DropdownOption(key=name, text=name) for name in STUDY_TYPES]
         manual_topic.value = ""
         manual_message.value = ""
         manual_open = True
         preview_manual_end()
 
+    def open_edit(record: StudySession) -> None:
+        nonlocal manual_open, editing_session, original_period_texts
+        if busy or not ready or manual_saving or history_loading:
+            return
+        editing_session = record
+        start = record.started_at.astimezone()
+        manual_date.value, manual_time.value = start.strftime("%d/%m/%Y"), start.strftime("%H:%M")
+        manual_duration.value = format_duration(record.duration_seconds)[:-3]
+        original_period_texts = (manual_date.value, manual_time.value, manual_duration.value)
+        manual_subject.value, manual_study_type.value = record.subject_id, record.study_type
+        types = list(STUDY_TYPES)
+        if record.study_type not in types:
+            types.append(record.study_type)
+        manual_study_type.options = [ft.DropdownOption(key=name, text=name) for name in types]
+        manual_topic.value = record.topic or ""
+        manual_message.value = ""
+        manual_open = True
+        preview_manual_end()
+
     def cancel_manual(event) -> None:
-        nonlocal manual_open
+        nonlocal manual_open, editing_session, original_period_texts
         if not manual_saving:
             manual_open = False
+            editing_session, original_period_texts = None, None
             render()
 
     async def save_manual(event) -> None:
-        nonlocal busy, manual_saving, manual_open, ready
+        nonlocal busy, manual_saving, manual_open, ready, editing_session, original_period_texts
         if busy or not ready or manual_saving:
             return
         if not manual_subject.value:
-            manual_message.value = "Cadastre e escolha uma matéria para o registro."
+            manual_message.value = "Cadastre e escolha uma matéria para a sessão."
             render()
             return
+        target = editing_session
+        timing_changes = {}
         try:
-            start, seconds = parse_manual_period(
-                manual_date.value or "", manual_time.value or "", manual_duration.value or "",
-            )
+            if target:
+                if target.source == "manual":
+                    start, seconds = form_period()
+                    original_date, original_time, original_duration = original_period_texts
+                    if (manual_date.value, manual_time.value) != (original_date, original_time):
+                        timing_changes["started_at"] = start
+                    if manual_duration.value != original_duration:
+                        timing_changes["duration_seconds"] = seconds
+            else:
+                start, seconds = form_period()
         except ValueError as error:
             manual_message.value = str(error)
             render()
@@ -620,26 +708,36 @@ async def main(page: ft.Page) -> None:
         render()
         async with state_lock:
             try:
-                result = await asyncio.to_thread(
-                    create_manual_session, manual_subject.value, manual_study_type.value,
-                    start, seconds, manual_topic.value,
-                )
+                if target:
+                    result = await asyncio.to_thread(
+                        update_finished_session, target, manual_subject.value, manual_study_type.value,
+                        manual_topic.value, **timing_changes,
+                    )
+                else:
+                    result = await asyncio.to_thread(
+                        create_manual_session, manual_subject.value, manual_study_type.value,
+                        start, seconds, manual_topic.value,
+                    )
                 saved = True
                 manual_open = False
-                message.value = f"Registro manual salvo. Tempo de estudo: {format_duration(result.duration_seconds)}."
+                editing_session, original_period_texts = None, None
+                action = "Alterações salvas" if target else "Registro manual salvo"
+                message.value = f"{action}. Tempo de estudo: {format_duration(result.duration_seconds)}."
                 await refresh_state()
             except ValueError as error:
                 if saved:
                     ready = False
-                    message.value = f"Registro salvo, mas a tela não pôde ser atualizada: {error}"
+                    action = "Alterações salvas" if target else "Registro salvo"
+                    message.value = f"{action}, mas a tela não pôde ser atualizada: {error}"
                 else:
                     manual_message.value = str(error)
             except (sqlite3.Error, OSError):
                 if saved:
                     ready = False
-                    message.value = "Registro salvo, mas o total não pôde ser atualizado."
+                    action = "Alterações salvas" if target else "Registro salvo"
+                    message.value = f"{action}, mas o total não pôde ser atualizado."
                 else:
-                    manual_message.value = "Não foi possível salvar o registro. Tente novamente."
+                    manual_message.value = "Não foi possível salvar. Tente novamente."
             finally:
                 busy = manual_saving = False
                 render()
@@ -691,11 +789,11 @@ async def main(page: ft.Page) -> None:
         expand=True, visible=False, scroll=ft.ScrollMode.AUTO,
         horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
     )
+    manual_timing_row = ft.Row([manual_date, manual_time, manual_duration], wrap=True)
     manual_panel = ft.Column(
         [
-            ft.Text("Adicionar sessão manual", size=20), manual_subject, manual_study_type, manual_topic,
-            ft.Row([manual_date, manual_time, manual_duration], wrap=True),
-            ft.Text("Informe apenas o tempo estudado. Cada registro representa um período contínuo, sem pausas."),
+            manual_title, manual_subject, manual_study_type, manual_topic,
+            manual_timing_row, manual_hint,
             manual_end, manual_message, ft.Row([manual_save_button, manual_cancel_button], wrap=True),
         ],
         expand=True, visible=False, scroll=ft.ScrollMode.AUTO,
