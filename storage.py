@@ -32,6 +32,13 @@ class StudyOverview:
     total_seconds: float
 
 
+@dataclass(frozen=True)
+class HistoryPage:
+    sessions: tuple[StudySession, ...]
+    offset: int
+    has_more: bool
+
+
 def database_path() -> Path:
     # Preserva o banco já usado no Windows, inclusive durante o desenvolvimento.
     if os.name == "nt" and os.environ.get("LOCALAPPDATA"):
@@ -286,6 +293,28 @@ def get_session(session_id: str) -> StudySession:
 def get_active_session() -> StudySession | None:
     with _connection() as connection:
         return _read_active_session(connection)
+
+
+def read_session_history(*, limit: int = 25, offset: int = 0) -> HistoryPage:
+    """Lê uma página de sessões finalizadas, da mais recente para a mais antiga."""
+    if type(limit) is not int or not 1 <= limit <= 100:
+        raise ValueError("A quantidade de sessões por página deve estar entre 1 e 100.")
+    if type(offset) is not int or not 0 <= offset <= 2**63 - 1:
+        raise ValueError("A posição da página deve ser um inteiro não negativo válido.")
+    with _connection() as connection:
+        rows = connection.execute(
+            """
+            SELECT id FROM sessions WHERE status = 'finished'
+            ORDER BY started_at DESC, id DESC
+            LIMIT ? OFFSET ?
+            """,
+            (limit + 1, offset),
+        ).fetchall()
+        return HistoryPage(
+            sessions=tuple(_read_session(connection, row["id"]) for row in rows[:limit]),
+            offset=offset,
+            has_more=len(rows) > limit,
+        )
 
 
 def read_study_overview(*, at: datetime | None = None, tz: tzinfo | None = None) -> StudyOverview:

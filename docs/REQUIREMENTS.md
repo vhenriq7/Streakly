@@ -39,6 +39,7 @@ Aplicativo pessoal de estudos para **Windows e Android**, com experiência simpl
 ## 4. Histórico
 
 - Listar sessões com data, matéria, tipo, assunto e tempo efetivo.
+- **MVP 0.7.0:** listagem somente de sessões finalizadas, ordenadas pelo início mais recente, em páginas de 25. Exibir também modo, início/fim no fuso local e duração sem pausas ou espera. Consultar ao abrir, atualizar ou paginar; falhas mantêm a lista e a página anteriores. A consulta não altera dados nem a sessão ativa. Criação, edição e exclusão manual permanecem para etapas seguintes.
 - Criar sessões manualmente e editar/excluir sessões existentes.
 - Toda alteração recalcula totais, metas, médias, calendário e ofensivas.
 - Identificadores únicos estáveis evitam duplicações na sincronização.

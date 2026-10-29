@@ -17,6 +17,7 @@ from storage import (
     get_subject_timer_settings,
     initialize_database,
     pause_session,
+    read_session_history,
     read_study_overview,
     resume_session,
     start_next_phase,
@@ -31,6 +32,7 @@ from timer import (
 
 
 POMODORO_PRESETS = {"25/5": (25 * 60, 5 * 60), "50/10": (50 * 60, 10 * 60)}
+HISTORY_PAGE_SIZE = 25
 
 
 async def main(page: ft.Page) -> None:
@@ -42,6 +44,10 @@ async def main(page: ft.Page) -> None:
     settings_subject: str | None = None
     today: date | None = None
     today_seconds = 0.0
+    history_offset = 0
+    history_has_more = False
+    history_loaded = False
+    history_loading = False
     busy = False
     ready = False
     state_lock = asyncio.Lock()
@@ -64,6 +70,9 @@ async def main(page: ft.Page) -> None:
         controls=[ft.Text("Nenhuma matéria cadastrada ainda.")],
         expand=True, spacing=8,
     )
+    history_status = ft.Text("Abra o histórico para consultar as sessões finalizadas.")
+    history_page_label = ft.Text()
+    history_list = ft.ListView(expand=True, spacing=16)
     subject_choice = ft.Dropdown(label="Matéria")
     study_type = ft.Dropdown(
         label="Tipo de estudo", value="Leitura",
@@ -238,6 +247,11 @@ async def main(page: ft.Page) -> None:
             shortcut.disabled = locked
         daily_date.value = today.strftime("%d/%m/%Y") if today else ""
         daily_total.value = format_duration(today_seconds) if ready else "Total indisponível"
+        history_locked = locked or history_loading
+        history_nav_button.disabled = history_loading
+        history_refresh_button.disabled = history_locked
+        history_previous_button.disabled = history_locked or not history_loaded or history_offset == 0
+        history_next_button.disabled = history_locked or not history_loaded or not history_has_more
         for field in (subject_choice, study_type, topic, mode_choice, preset_choice, *custom_fields):
             field.disabled = locked or active
         preset_choice.visible = is_pomodoro
@@ -430,6 +444,61 @@ async def main(page: ft.Page) -> None:
         if session:
             await perform(finish_session, "Sessão finalizada e salva.", session.id)
 
+    def history_entry(record: StudySession) -> ft.Column:
+        if record.ended_at is None:
+            raise ValueError("Sessão finalizada sem horário de término.")
+        mode = "Pomodoro" if record.mode == "pomodoro" else "Progressivo"
+        start = record.started_at.astimezone().strftime("%d/%m/%Y %H:%M:%S (%z)")
+        end = record.ended_at.astimezone().strftime("%d/%m/%Y %H:%M:%S (%z)")
+        details = [
+            ft.Text(f"{record.subject_name} · {format_duration(record.duration_seconds)}",
+                    size=18, weight=ft.FontWeight.BOLD),
+            ft.Text(f"{record.study_type} · {mode}"),
+        ]
+        if record.topic:
+            details.append(ft.Text(f"Assunto: {record.topic}"))
+        details.extend([ft.Text(f"Início: {start}"), ft.Text(f"Fim: {end}"), ft.Divider()])
+        return ft.Column(details, spacing=4, horizontal_alignment=ft.CrossAxisAlignment.STRETCH)
+
+    async def load_history(offset: int = 0) -> None:
+        nonlocal history_loading, history_loaded, history_offset, history_has_more, history_list
+        if history_loading:
+            return
+        if not ready:
+            history_status.value = "Histórico indisponível enquanto o banco local não puder ser lido."
+            render()
+            return
+        history_loading = True
+        history_status.value = "Carregando histórico…"
+        render()
+        try:
+            result = await asyncio.to_thread(read_session_history, limit=HISTORY_PAGE_SIZE, offset=offset)
+            entries = [history_entry(record) for record in result.sessions]
+            # Recriar a lista faz cada página começar no topo.
+            history_list = ft.ListView(
+                controls=entries or [ft.Text("Nenhuma sessão finalizada nesta página.")],
+                expand=True, spacing=16,
+            )
+            history_panel.controls[-1] = history_list
+            history_offset, history_has_more = result.offset, result.has_more
+            history_loaded = True
+            history_page_label.value = f"Página {history_offset // HISTORY_PAGE_SIZE + 1}"
+            history_status.value = "Sessões finalizadas, ordenadas pelo início mais recente. Horários locais."
+        except (sqlite3.Error, OSError, ValueError):
+            history_status.value = "Não foi possível carregar o histórico. Tente Atualizar."
+        finally:
+            history_loading = False
+            render()
+
+    async def refresh_history(event) -> None:
+        await load_history()
+
+    async def previous_history_page(event) -> None:
+        await load_history(max(0, history_offset - HISTORY_PAGE_SIZE))
+
+    async def next_history_page(event) -> None:
+        await load_history(history_offset + HISTORY_PAGE_SIZE)
+
     save_button = ft.Button("Salvar matéria", on_click=save_subject)
     start_button = ft.Button("Iniciar", on_click=start)
     pause_button = ft.Button("Pausar", on_click=pause)
@@ -438,6 +507,9 @@ async def main(page: ft.Page) -> None:
     finish_button = ft.Button("Finalizar", on_click=finish)
     test_notice_button = ft.TextButton("Testar aviso do Windows", on_click=test_notice)
     open_session_button = ft.TextButton("Abrir sessão em andamento", on_click=lambda event: show_timer(event))
+    history_refresh_button = ft.TextButton("Atualizar", on_click=refresh_history)
+    history_previous_button = ft.TextButton("Mais recentes", on_click=previous_history_page)
+    history_next_button = ft.TextButton("Mais antigas", on_click=next_history_page)
     subject_choice.on_select = choose_subject
     mode_choice.on_select = preset_choice.on_select = choose_mode_or_preset
     for field in custom_fields:
@@ -467,18 +539,37 @@ async def main(page: ft.Page) -> None:
         expand=True, visible=False, scroll=ft.ScrollMode.AUTO,
         horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
     )
+    history_panel = ft.Column(
+        [
+            ft.Text("Histórico de sessões", size=20), history_status,
+            ft.Row([history_refresh_button, history_previous_button, history_page_label,
+                    history_next_button], wrap=True),
+            history_list,
+        ],
+        expand=True, visible=False, horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+    )
 
     def show_subjects(event) -> None:
+        history_panel.visible = False
         home_panel.visible, subjects_panel.visible, timer_panel.visible = False, True, False
         page.update()
 
     def show_timer(event) -> None:
+        history_panel.visible = False
         home_panel.visible, subjects_panel.visible, timer_panel.visible = False, False, True
         page.update()
 
     def show_home(event) -> None:
+        history_panel.visible = False
         home_panel.visible, subjects_panel.visible, timer_panel.visible = True, False, False
         page.update()
+
+    async def show_history(event) -> None:
+        home_panel.visible = subjects_panel.visible = timer_panel.visible = False
+        history_panel.visible = True
+        await load_history()
+
+    history_nav_button = ft.TextButton("Histórico", on_click=show_history)
 
     page.add(ft.SafeArea(
         content=ft.Column(
@@ -488,8 +579,9 @@ async def main(page: ft.Page) -> None:
                     ft.TextButton("Início", on_click=show_home),
                     ft.TextButton("Matérias", on_click=show_subjects),
                     ft.TextButton("Cronômetro", on_click=show_timer),
+                    history_nav_button,
                 ], wrap=True),
-                message, home_panel, subjects_panel, timer_panel,
+                message, home_panel, subjects_panel, timer_panel, history_panel,
             ],
             expand=True, horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
         ),

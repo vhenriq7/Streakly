@@ -2,7 +2,7 @@
 
 Aplicativo pessoal de acompanhamento de estudos para **Windows e Android**, com registro de tempo, Pomodoro, metas diárias, ofensivas (streaks), calendário e estatísticas. Projeto **offline-first**: os dados são gravados localmente e sincronizados com a nuvem quando houver conexão.
 
-> **Status:** início do MVP offline. A versão 0.6.0 acrescenta o painel **Tempo estudado hoje**, somando as matérias e a sessão em andamento por dia local, com acesso à sessão e às matérias. Os 51 testes automatizados e a integração com controles Flet passaram; falta conferir o painel na janela do Windows. As provas de conceito anteriores validaram persistência no Windows/Android, cronômetro progressivo no Windows e exibição do aviso de foco concluído no Windows, este confirmado pelo usuário em 28/10/2026. Avisos Android e com o app fechado seguem pendentes, nos marcos combinados.
+> **Status:** início do MVP offline. A versão 0.7.0 acrescenta o **Histórico** de sessões finalizadas, com páginas de 25 registros, ao painel diário 0.6.0. Os 59 testes automatizados e a integração com controles Flet passaram; falta conferir a nova tela na janela do Windows. As provas de conceito anteriores validaram persistência no Windows/Android, cronômetro progressivo no Windows e exibição do aviso de foco concluído no Windows, este confirmado pelo usuário em 28/10/2026. Avisos Android e com o app fechado seguem pendentes, nos marcos combinados.
 
 ## Funcionalidades planejadas
 
@@ -85,7 +85,7 @@ Em **Cronômetro**, escolha matéria, tipo de estudo e assunto opcional. Use **I
 
 Conforme escolha do usuário, fechar o app com uma sessão rodando mantém a contagem até pausar ou finalizar. Ao reabrir, o app recupera a mesma sessão pelos eventos UTC no SQLite. Se estiver pausada, o período fechado não conta. A tarefa de atualização da tela não precisa sobreviver ao fechamento.
 
-`timer.py` contém os modelos e o cálculo dos intervalos; `storage.py` grava eventos e estado juntos em transação; `main.py` cuida da interface. A tela atualiza a cada segundo enquanto visível, com consultas ao banco; as gravações ocorrem nas ações. A migração do esquema 1 para 2 adiciona tabelas e preserva as matérias existentes. Os tipos de estudo e o assunto ficam como texto nesta PoC; o catálogo completo e a interface de histórico serão tratados nas etapas seguintes.
+`timer.py` contém os modelos e o cálculo dos intervalos; `storage.py` grava eventos e estado juntos em transação; `main.py` cuida da interface. A tela atualiza a cada segundo enquanto visível, com consultas ao banco; as gravações ocorrem nas ações. A migração do esquema 1 para 2 adiciona tabelas e preserva as matérias existentes. Os tipos de estudo e o assunto ficam como texto nesta PoC; o catálogo completo fica para depois. A listagem do histórico foi acrescentada na versão 0.7.0.
 
 Para executar os testes, que usam apenas bancos temporários:
 
@@ -95,7 +95,7 @@ Para executar os testes, que usam apenas bancos temporários:
 
 Os testes cobrem recuperação em outro processo, pausas, sessão única, concorrência, rollback em falha, migração e duração atravessando meia-noite. O rateio por dia foi acrescentado no painel 0.6.0; metas e estatísticas completas continuam nas etapas seguintes. O cálculo depende da hora correta do dispositivo; transições anteriores ao último evento são recusadas, mas a política completa para alterações manuais do relógio ainda não foi implementada.
 
-Para validar o cronômetro agora, execute `main.py` no Windows, inicie uma sessão, navegue entre **Início**, **Matérias** e **Cronômetro**, feche e reabra. Depois pause, feche novamente e confirme que o tempo permanece parado. Retome e finalize para conferir a duração sem as pausas. Nos marcos de validação Android, repetir esse roteiro atualizando o APK existente. As sessões finalizadas ficam no banco; a tela de histórico ainda não faz parte desta etapa.
+Para validar o cronômetro agora, execute `main.py` no Windows, inicie uma sessão, navegue entre **Início**, **Matérias**, **Cronômetro** e **Histórico**, feche e reabra. Depois pause, feche novamente e confirme que o tempo permanece parado. Retome e finalize para conferir a duração sem as pausas. Nos marcos de validação Android, repetir esse roteiro atualizando o APK existente. As sessões finalizadas ficam disponíveis em **Histórico**.
 
 ### Pomodoro básico — versão 0.3.0
 
@@ -138,6 +138,16 @@ O total considera o dia local configurado no dispositivo. Um estudo das 23h50 à
 O esquema SQLite continua na versão 4. O painel calcula o total a partir dos eventos existentes, sem gravar um contador diário nem instalar dependências. Os testes usam horários simulados e verificam inclusive fronteiras de meia-noite e janelas de 23/25 horas. A integração com controles Flet passou; a conferência na janela nativa ainda está pendente. Nenhum APK foi gerado nesta etapa.
 
 Para conferir no Windows, inicie uma sessão progressiva e volte a **Início**: o total deve crescer. Pause pelo cronômetro e volte: o total deve ficar parado. Finalize e confirme que o acumulado permanece; depois estude outra matéria para verificar a soma. Feche e reabra para conferir a recuperação da sessão e do total.
+
+### Histórico de sessões — versão 0.7.0
+
+Em **Histórico**, consulte as sessões finalizadas, da data de início mais recente para a mais antiga. Cada registro mostra matéria, tipo, assunto quando informado, modo, início, fim e duração efetiva de estudo. Os horários usam o fuso local do dispositivo, com seu deslocamento UTC entre parênteses. A duração exclui pausas manuais, intervalos Pomodoro e espera entre fases.
+
+A lista carrega 25 sessões por página. Use **Mais antigas** e **Mais recentes** para navegar; **Atualizar** e reabrir a tela voltam à primeira página. A consulta ocorre apenas nessas ações, sem recarregar o histórico a cada segundo. Se outra instância finalizar uma sessão, use Atualizar para vê-la. Após erro de leitura, a lista e a posição anteriores são mantidas, com uma mensagem de erro.
+
+A consulta não grava dados nem altera a sessão ativa. Uma sessão rodando, pausada ou aguardando a próxima fase entra no histórico somente depois de **Finalizar**. A contagem e os avisos continuam funcionando enquanto você consulta a lista. O esquema permanece na versão 4, sem dependências novas nem APK nesta etapa. Criação, edição e exclusão manual ficam para etapas seguintes.
+
+Para conferir no Windows, abra Histórico e verifique as sessões já salvas. Inicie uma sessão, pause e consulte a lista: ela ainda não deve aparecer. Finalize, reabra o Histórico e confira matéria, assunto e tempo de estudo. Feche e reabra o app para confirmar a persistência. Os 59 testes e a integração com controles Flet passaram; falta a conferência do usuário na janela nativa.
 
 ## Princípios de desenvolvimento
 

@@ -1,6 +1,6 @@
 [project]
 name = "streakly"
-version = "0.6.0"
+version = "0.7.0"
 description = "Prova de conceito offline de acompanhamento de estudos"
 requires-python = ">=3.14,<3.15"
 dependencies = ["flet==1.0.5"]
@@ -8,7 +8,7 @@ dependencies = ["flet==1.0.5"]
 [tool.flet]
 product = "Streakly"
 bundle_id = "com.streakly.poc"
-build_number = 6
+build_number = 7
 
 [tool.flet.app]
 path = "."
