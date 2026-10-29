@@ -2,7 +2,7 @@
 
 Aplicativo pessoal de acompanhamento de estudos para **Windows e Android**, com registro de tempo, Pomodoro, metas diárias, ofensivas (streaks), calendário e estatísticas. Projeto **offline-first**: os dados são gravados localmente e sincronizados com a nuvem quando houver conexão.
 
-> **Status:** início do MVP offline. A versão 0.9.0 acrescenta edição no **Histórico**: matéria, tipo e assunto de sessões finalizadas, além de início e duração dos registros manuais. Os 84 testes automatizados e a integração com controles Flet passaram; falta conferir a edição na janela do Windows. As provas de conceito anteriores validaram persistência no Windows/Android, cronômetro progressivo no Windows e exibição do aviso de foco concluído no Windows, este confirmado pelo usuário em 28/10/2026. Avisos Android e com o app fechado seguem pendentes, nos marcos combinados.
+> **Status:** início do MVP offline. A versão 0.10.0 acrescenta exclusão de sessões finalizadas pelo **Histórico**, com confirmação dos dados e atualização do total diário. Os 93 testes automatizados e a integração com controles Flet passaram; falta conferir a confirmação na janela do Windows. As provas de conceito anteriores validaram persistência no Windows/Android, cronômetro progressivo no Windows e exibição do aviso de foco concluído no Windows, este confirmado pelo usuário em 28/10/2026. Avisos Android e com o app fechado seguem pendentes, nos marcos combinados.
 
 ## Funcionalidades planejadas
 
@@ -145,7 +145,7 @@ Em **Histórico**, consulte as sessões finalizadas, da data de início mais rec
 
 A lista carrega 25 sessões por página. Use **Mais antigas** e **Mais recentes** para navegar; **Atualizar** e reabrir a tela voltam à primeira página. A consulta ocorre apenas nessas ações, sem recarregar o histórico a cada segundo. Se outra instância finalizar uma sessão, use Atualizar para vê-la. Após erro de leitura, a lista e a posição anteriores são mantidas, com uma mensagem de erro.
 
-A consulta não grava dados nem altera a sessão ativa. Uma sessão rodando, pausada ou aguardando a próxima fase entra no histórico somente depois de **Finalizar**. A contagem e os avisos continuam funcionando enquanto você consulta a lista. A etapa 0.7.0 manteve o esquema 4, sem dependências novas nem APK. O cadastro manual foi acrescentado na 0.8.0 e a edição descrita abaixo na 0.9.0; exclusão fica para uma etapa seguinte.
+A consulta não grava dados nem altera a sessão ativa. Uma sessão rodando, pausada ou aguardando a próxima fase entra no histórico somente depois de **Finalizar**. A contagem e os avisos continuam funcionando enquanto você consulta a lista. A etapa 0.7.0 manteve o esquema 4, sem dependências novas nem APK. O cadastro manual foi acrescentado na 0.8.0, a edição na 0.9.0 e a exclusão na 0.10.0, descritas abaixo.
 
 Para conferir no Windows, abra Histórico e verifique as sessões já salvas. Inicie uma sessão, pause e consulte a lista: ela ainda não deve aparecer. Finalize, reabra o Histórico e confira matéria, assunto e tempo de estudo. Feche e reabra o app para confirmar a persistência. Os 59 testes e a integração com controles Flet passaram; falta a conferência do usuário na janela nativa.
 
@@ -157,7 +157,7 @@ Cada lançamento representa um período contínuo, sem pausas; registre blocos s
 
 Ao salvar, o registro já entra finalizado no Histórico como **Registro manual** e o total diário é atualizado, inclusive repartindo o período pela meia-noite. O cronômetro e as preferências por matéria são preservados. **Cancelar** descarta o formulário sem gravar; navegar entre telas preserva o preenchimento enquanto o app estiver aberto.
 
-O esquema 5 acrescenta a origem do registro e identifica as sessões anteriores como feitas pelo cronômetro, preservando dados e identificadores. Sessão e dois eventos são gravados juntos em transação. Os 72 testes e a integração com controles Flet passaram, incluindo falhas antes/depois da gravação e recusa de duplicação. Sem dependências novas ou APK nesta etapa. A edição foi acrescentada na 0.9.0; exclusão continua pendente.
+O esquema 5 acrescenta a origem do registro e identifica as sessões anteriores como feitas pelo cronômetro, preservando dados e identificadores. Sessão e dois eventos são gravados juntos em transação. Os 72 testes e a integração com controles Flet passaram, incluindo falhas antes/depois da gravação e recusa de duplicação. Sem dependências novas ou APK nesta etapa. A edição foi acrescentada na 0.9.0 e a exclusão na 0.10.0.
 
 Para conferir, registre um período passado que ainda não conste nos seus estudos, confira **Registro manual** no Histórico e o total em Início. Feche e reabra para confirmar a persistência. Falta essa conferência na janela nativa do Windows.
 
@@ -170,6 +170,16 @@ Para sessões feitas pelo cronômetro, o formulário mostra o período registrad
 Se outra instância alterar a sessão depois de ela ser carregada, o app recusa sobrescrevê-la. Cancele a edição, atualize o Histórico e confira os dados atuais antes de tentar novamente. Erros antes da gravação preservam o formulário; erros na atualização da tela após gravar informam que as alterações já foram salvas.
 
 Os 84 testes e a integração com controles Flet passaram, incluindo preservação de eventos, precisão, conflitos, rollback e reabertura. O esquema continua na versão 5, sem dependências novas ou APK. Para conferir no Windows, corrija o assunto de uma sessão e verifique que sua duração permanece igual; em um registro manual, ajuste um período real e confira o total em Início. Falta essa validação na janela nativa.
+
+### Exclusão no Histórico — versão 0.10.0
+
+Use **Excluir** em uma sessão finalizada. A confirmação mostra matéria, tipo, assunto quando informado, origem, início, fim e tempo de estudo. **Cancelar** fecha a confirmação sem gravar. Somente **Excluir definitivamente** remove a sessão e seus eventos; a exclusão é permanente nesta etapa, sem lixeira ou desfazer.
+
+Registros manuais, progressivos e Pomodoro finalizados podem ser excluídos. Sessões ativas, pausadas ou aguardando outra fase permanecem protegidas. O Histórico volta à primeira página e o total diário é recalculado após sucesso. Matérias, preferências, outras sessões e o cronômetro ativo são preservados. Se o registro mudou em outra instância desde a leitura, a exclusão é recusada: cancele, atualize o Histórico e confira os dados atuais.
+
+Uma falha antes da gravação mantém a confirmação com erro; falha ao atualizar a tela depois da exclusão informa que a sessão já foi excluída. Fechar uma confirmação ou desconectar antes de confirmar não executa a exclusão. A operação já confirmada pode terminar se o app for fechado durante a gravação.
+
+Os 93 testes e a integração com controles Flet passaram, incluindo cancelamento, conflitos, rollback e reconexão. O esquema permanece na versão 5; não há dependências novas nem APK. Para conferir no Windows, abra a confirmação e use primeiro Cancelar para verificar que a sessão permanece. Confirme a exclusão apenas em uma sessão que deseja remover e confira a lista e o total em Início. Falta essa conferência na janela nativa.
 
 ## Princípios de desenvolvimento
 

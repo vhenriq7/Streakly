@@ -14,6 +14,7 @@ from notifications import (
 from storage import (
     add_subject,
     create_manual_session,
+    delete_finished_session,
     finish_session,
     get_subject_timer_settings,
     initialize_database,
@@ -105,6 +106,8 @@ async def main(page: ft.Page) -> None:
     manual_saving = False
     editing_session: StudySession | None = None
     original_period_texts: tuple[str, str, str] | None = None
+    delete_dialog: ft.AlertDialog | None = None
+    delete_busy = False
     busy = False
     ready = False
     state_lock = asyncio.Lock()
@@ -321,9 +324,12 @@ async def main(page: ft.Page) -> None:
             shortcut.disabled = locked
         daily_date.value = today.strftime("%d/%m/%Y") if today else ""
         daily_total.value = format_duration(today_seconds) if ready else "Total indisponível"
-        history_locked = locked or history_loading
+        history_locked = locked or history_loading or delete_dialog is not None
         timing_editable = editing_session is None or editing_session.source == "manual"
-        history_nav_button.disabled = history_loading or manual_saving
+        history_nav_button.disabled = history_loading or manual_saving or delete_dialog is not None
+        if delete_dialog:
+            delete_dialog.actions[0].disabled = delete_busy
+            delete_dialog.actions[1].disabled = locked or delete_busy
         manual_open_button.disabled = history_locked or not subject_options
         manual_save_button.disabled = locked or manual_saving or not subject_options
         manual_cancel_button.disabled = manual_saving
@@ -560,9 +566,108 @@ async def main(page: ft.Page) -> None:
         def edit_record(event) -> None:
             open_edit(record)
 
+        def delete_record(event) -> None:
+            request_delete(record)
+
         details.extend([ft.Text(f"Início: {start}"), ft.Text(f"Fim: {end}"),
-                        ft.TextButton("Editar", on_click=edit_record), ft.Divider()])
+                        ft.TextButton("Editar", on_click=edit_record),
+                        ft.TextButton("Excluir", on_click=delete_record), ft.Divider()])
         return ft.Column(details, spacing=4, horizontal_alignment=ft.CrossAxisAlignment.STRETCH)
+
+    def close_delete_dialog(dialog: ft.AlertDialog) -> None:
+        nonlocal delete_dialog
+        if delete_dialog is not dialog:
+            return
+        delete_dialog = None
+        if dialog.open:
+            if connected:
+                page.pop_dialog()
+            else:
+                dialog.open = False
+
+    def request_delete(record: StudySession) -> None:
+        nonlocal delete_dialog
+        if (busy or not ready or history_loading or manual_open or delete_busy
+                or delete_dialog is not None or not connected or not page.app_visible):
+            return
+        error_message = ft.Text()
+
+        def dismissed(event) -> None:
+            nonlocal delete_dialog
+            if delete_dialog is dialog:
+                delete_dialog = None
+                render()
+
+        def cancel_delete(event) -> None:
+            if delete_busy or delete_dialog is not dialog:
+                return
+            close_delete_dialog(dialog)
+            render()
+
+        async def confirm_delete(event) -> None:
+            nonlocal busy, delete_busy, ready
+            if (busy or delete_busy or not ready or not connected
+                    or delete_dialog is not dialog or not dialog.open):
+                return
+            busy = delete_busy = True
+            deleted = False
+            error_message.value = ""
+            render()
+            async with state_lock:
+                try:
+                    await asyncio.to_thread(delete_finished_session, record)
+                    deleted = True
+                    close_delete_dialog(dialog)
+                    message.value = "Sessão excluída."
+                    await refresh_state()
+                except ValueError as error:
+                    if deleted:
+                        ready = False
+                        message.value = f"Sessão excluída, mas a tela não pôde ser atualizada: {error}"
+                    elif delete_dialog is dialog:
+                        error_message.value = str(error)
+                    else:
+                        message.value = str(error)
+                except (sqlite3.Error, OSError):
+                    if deleted:
+                        ready = False
+                        message.value = "Sessão excluída, mas o total não pôde ser atualizado."
+                    elif delete_dialog is dialog:
+                        error_message.value = "Não foi possível excluir a sessão. Tente novamente."
+                    else:
+                        message.value = "Não foi possível excluir a sessão. Tente novamente."
+                finally:
+                    busy = delete_busy = False
+                    render()
+            if deleted:
+                await load_history()
+
+        start = record.started_at.astimezone().strftime("%d/%m/%Y %H:%M:%S (%z)")
+        end = record.ended_at.astimezone().strftime("%d/%m/%Y %H:%M:%S (%z)")
+        origin = ("Registro manual" if record.source == "manual" else
+                  "Pomodoro" if record.mode == "pomodoro" else "Progressivo")
+        summary = [
+            ft.Text(f"{record.subject_name} · {record.study_type}"),
+            ft.Text(origin),
+            ft.Text(f"Início: {start}\nFim: {end}"),
+            ft.Text(f"Tempo de estudo: {format_duration(record.duration_seconds)}"),
+        ]
+        if record.topic:
+            summary.append(ft.Text(f"Assunto: {record.topic}"))
+        summary.extend([
+            ft.Text("A exclusão é permanente e remove esta sessão do Histórico e dos totais."),
+            error_message,
+        ])
+        dialog = ft.AlertDialog(
+            modal=True, scrollable=True, title=ft.Text("Excluir sessão?"),
+            content=ft.Column(summary, tight=True),
+            actions=[ft.TextButton("Cancelar", on_click=cancel_delete),
+                     ft.Button("Excluir definitivamente", on_click=confirm_delete)],
+            on_dismiss=dismissed,
+        )
+        delete_dialog = dialog
+        page.show_dialog(dialog)
+        render()
 
     async def load_history(offset: int = 0) -> None:
         nonlocal history_loading, history_loaded, history_offset, history_has_more, history_list
@@ -638,7 +743,7 @@ async def main(page: ft.Page) -> None:
 
     def open_manual(event) -> None:
         nonlocal manual_open, editing_session, original_period_texts
-        if busy or not ready or manual_saving:
+        if busy or not ready or manual_saving or delete_dialog is not None:
             return
         start = (datetime.now(UTC) - timedelta(minutes=30)).astimezone()
         manual_date.value, manual_time.value = start.strftime("%d/%m/%Y"), start.strftime("%H:%M")
@@ -654,7 +759,7 @@ async def main(page: ft.Page) -> None:
 
     def open_edit(record: StudySession) -> None:
         nonlocal manual_open, editing_session, original_period_texts
-        if busy or not ready or manual_saving or history_loading:
+        if busy or not ready or manual_saving or history_loading or delete_dialog is not None:
             return
         editing_session = record
         start = record.started_at.astimezone()
@@ -898,8 +1003,11 @@ async def main(page: ft.Page) -> None:
             ticker = page.run_task(update_timer)
 
     def stop_updates(event=None) -> None:
-        nonlocal connected
+        nonlocal connected, delete_dialog
         connected = False
+        if delete_dialog:
+            delete_dialog.open = False
+            delete_dialog = None
         if ticker:
             ticker.cancel()
         for task in tuple(pending_notices):

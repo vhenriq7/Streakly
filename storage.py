@@ -575,6 +575,23 @@ def update_finished_session(
         return _read_session(connection, current.id)
 
 
+def delete_finished_session(expected: StudySession) -> None:
+    """Exclui uma sessão finalizada e seus detalhes, recusando uma leitura antiga."""
+    if not isinstance(expected, StudySession):
+        raise ValueError("Escolha uma sessão finalizada para excluir.")
+    with _connection(write=True) as connection:
+        current = _read_session(connection, expected.id)
+        if current.status != "finished":
+            raise ValueError("Somente sessões finalizadas podem ser excluídas.")
+        if current != expected:
+            raise ValueError("A sessão foi alterada desde a leitura. Atualize o Histórico antes de excluir.")
+
+        # Remove as dependências antes da sessão, mantendo as chaves estrangeiras ativas.
+        connection.execute("DELETE FROM pomodoro_state WHERE session_id = ?", (current.id,))
+        connection.execute("DELETE FROM session_events WHERE session_id = ?", (current.id,))
+        connection.execute("DELETE FROM sessions WHERE id = ?", (current.id,))
+
+
 def start_session(
     subject_id: str,
     study_type: str,
