@@ -66,7 +66,7 @@ Entidades candidatas:
 
 Adicionar `user_id` remoto para vincular todos os dados à conta, mesmo sendo de uso pessoal. Usar UUID para chaves criadas offline; timestamps em UTC e data de estudo calculada com política explícita de fuso local. Criar migrações versionadas.
 
-**Detalhes ainda a projetar:** regras para assuntos renomeados/excluídos, metas específicas e descanso, e definição de conflitos. A representação Pomodoro e a vigência da meta padrão estão descritas na seção 5.
+**Detalhes ainda a projetar:** regras para assuntos renomeados/excluídos, apresentação do calendário, cálculo de ofensivas e definição de conflitos remotos. A representação Pomodoro, a vigência da meta padrão e as exceções por data estão descritas na seção 5.
 
 ## 5. Contagem confiável de tempo
 
@@ -147,7 +147,13 @@ A remoção segue a ordem `pomodoro_state`, `session_events`, `sessions`, `subje
 
 `read_study_overview` inclui a meta aplicável na mesma leitura consistente do dia e do total. `set_default_daily_goal` usa `BEGIN IMMEDIATE`, valida o dia local da edição e compara a meta esperada com a configuração atual antes de gravar. Uma mudança no mesmo dia preserva o UUID dessa vigência; uma mudança posterior inicia outro período. Configurações futuras em relação ao relógio local impedem gravar um período anterior. As consultas não criam vigências e as ações de estudo não modificam metas.
 
-A interface configura a duração em HH:MM e exibe o progresso no Início, sem impor uma meta inicial. A barra fica limitada a 100% e o restante nunca é negativo; a indicação de meta atingida usa o total efetivo. O formulário preserva o rascunho ao navegar, bloqueia envio duplicado e distingue falha antes/depois do commit. Mudança do dia ou conflito exige cancelar e reabrir a edição. Falha de leitura indica indisponibilidade, sem substituir dados por zero. Metas específicas por data, descanso, ofensivas e calendário permanecem para as próximas etapas.
+A interface configura a duração em HH:MM e exibe o progresso no Início, sem impor uma meta inicial. A barra fica limitada a 100% e o restante nunca é negativo; a indicação de meta atingida usa o total efetivo. O formulário preserva o rascunho ao navegar, bloqueia envio duplicado e distingue falha antes/depois do commit. Mudança do dia ou conflito exige cancelar e reabrir a edição. Falha de leitura indica indisponibilidade, sem substituir dados por zero. Metas específicas por data e descanso foram acrescentados na 0.15.0; ofensivas e a grade visual do calendário permanecem para as próximas etapas.
+
+**Metas por data e descanso 0.15.0:** o esquema 7 acrescenta `daily_goal_overrides`, com UUID, data local única, duração opcional e indicador de descanso. A restrição `CHECK` exige duração positiva não nula para meta específica e duração nula para descanso, impedindo os dois estados ao mesmo tempo. `DailyGoalOverride` representa a exceção. `DailyPlan` reúne data, padrão e exceção, com `effective_seconds` e `is_rest_day`; `read_daily_plan` lê ambos no mesmo snapshot. `StudyOverview.goal` continua representando o padrão e recebe `goal_override` adicional na leitura consistente do resumo.
+
+`set_daily_goal_override` e `clear_daily_goal_override` comparam a exceção esperada sob `BEGIN IMMEDIATE` antes de atualizar ou remover. Uma alteração preserva seu UUID, e valores iguais não exigem gravação; a remoção retorna ao padrão vigente na data, inclusive `None` antes da primeira vigência. As funções aceitam datas passadas ou futuras escolhidas explicitamente e não alteram a linha do tempo do padrão, sessões, eventos ou preferências. Isso mantém a regra de que mudar o padrão não reescreve dias anteriores, ao mesmo tempo que permite corrigir uma data específica.
+
+A tela Calendário consulta uma data antes de editar sua regra. O formulário mantém a data consultada e o snapshot usados na gravação; mudar o texto da data exige nova consulta, evitando aplicar um rascunho a outro dia. Navegação preserva os campos, Cancelar não grava e voltar ao padrão pede confirmação se houver exceção. Falhas anteriores mantêm o preenchimento; falhas posteriores informam que a gravação já ocorreu. O Início prioriza a exceção de hoje e oculta a barra em descanso, mantendo todo o tempo estudado. Configurações continua mostrando a meta padrão separadamente. Não há grade mensal, estatísticas ou cálculo de ofensivas neste incremento.
 
 ## 6. Protocolo de sincronização
 
@@ -201,6 +207,8 @@ O Android reutiliza `main.py`, `storage.py`, `timer.py` e `notifications.py`, co
 **Tipos personalizados 0.13.0:** os 120 testes passaram, incluindo nomes sem colisão, Unicode, sugestões distintas, leitura sem gravações e reabertura em outro processo. A integração com controles Flet e SQLite temporário verificou progressivo, Pomodoro, criação manual, edição sem alterar eventos ou duração, reutilização, rascunhos, cancelamento e falhas antes/depois da gravação. Também conferiu que a consulta de tipos não ocorre no tick. Falta conferir os campos e a reutilização na janela nativa do Windows. Não houve migração, dependências novas ou APK; o banco pessoal não foi usado nos testes.
 
 **Meta diária padrão 0.14.0:** os 134 testes passaram, incluindo vigência entre dias, fusos, concorrência, rollback, leitura consistente de total/meta, migração 5→6 e reabertura em outro processo. A integração com controles Flet e SQLite temporário verificou ausência de meta inicial, validação, rascunhos, Cancelar, progresso, meta atingida, falhas antes/depois da gravação, clique duplicado, virada de dia, precisão e reabertura. Falta conferir a configuração e o progresso na janela nativa do Windows. O esquema 6 preserva os dados de estudo existentes; não houve dependências novas ou APK e o banco pessoal não foi usado nos testes.
+
+**Metas por data e descanso 0.15.0:** os 151 testes passaram, incluindo prioridade, descanso, datas passadas/futuras, conflitos, concorrência, rollback, leitura consistente, migração 6→7 e reabertura. A integração com controles Flet e SQLite temporário verificou rascunhos, data alterada, cancelamento de consulta pendente, reconexão, confirmação para voltar ao padrão, falhas antes/depois da gravação, clique duplicado, avanço de data e preservação dos estudos, além da regressão da exclusão de sessões. Falta conferir consulta, edição e confirmação na janela nativa do Windows. A migração aditiva para o esquema 7 preserva os dados anteriores; não houve dependências novas ou APK e o banco pessoal não foi usado nos testes.
 
 Antes do MVP completo:
 

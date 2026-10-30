@@ -69,7 +69,7 @@ class FinishedSessionDeletionTests(TemporaryDatabaseTest):
                 self.assertIsNone(storage.delete_finished_session(saved))
                 self.assertEqual(self.snapshot(), self.without_session(before, saved.id))
                 self.assertEqual(self.execute("PRAGMA foreign_key_check"), [])
-                self.assertEqual(self.execute("PRAGMA user_version"), [(6,)])
+                self.assertEqual(self.execute("PRAGMA user_version"), [(7,)])
                 self.assertEqual(storage.get_active_session(), paused)
                 self.assertNotIn(saved.id, [item.id for item in storage.read_session_history().sessions])
                 with self.assertRaises(ValueError):

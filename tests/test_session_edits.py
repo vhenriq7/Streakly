@@ -119,7 +119,7 @@ class FinishedSessionEditTests(TemporaryDatabaseTest):
         self.assertEqual(self.event_ids(saved.id), original_ids)
         self.assertEqual(storage.read_study_overview(at=now, tz=zone).total_seconds, 600)
         self.assertEqual(self.row_counts(), (1, 2))
-        self.assertEqual(self.execute("PRAGMA user_version"), [(6,)])
+        self.assertEqual(self.execute("PRAGMA user_version"), [(7,)])
 
     def test_metadata_and_noop_edits_keep_exact_seconds_microseconds_and_all_rows(self):
         start = at(0) + timedelta(microseconds=123456)

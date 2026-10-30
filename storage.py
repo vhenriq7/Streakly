@@ -16,7 +16,7 @@ from timer import (
 )
 
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 NAMED_PRESETS = {
     "25/5": (1500, 300, 900, 4),
@@ -32,12 +32,40 @@ class DefaultDailyGoal:
 
 
 @dataclass(frozen=True)
+class DailyGoalOverride:
+    id: str
+    day: date
+    duration_seconds: int | None
+    is_rest_day: bool
+
+
+@dataclass(frozen=True)
+class DailyPlan:
+    day: date
+    default_goal: DefaultDailyGoal | None
+    override: DailyGoalOverride | None
+
+    @property
+    def is_rest_day(self) -> bool:
+        return self.override is not None and self.override.is_rest_day
+
+    @property
+    def effective_seconds(self) -> int | None:
+        if self.is_rest_day:
+            return None
+        if self.override is not None:
+            return self.override.duration_seconds
+        return self.default_goal.duration_seconds if self.default_goal else None
+
+
+@dataclass(frozen=True)
 class StudyOverview:
     subjects: tuple[tuple[str, str], ...]
     active_session: StudySession | None
     day: date
     total_seconds: float
     goal: DefaultDailyGoal | None = None
+    goal_override: DailyGoalOverride | None = None
 
 
 @dataclass(frozen=True)
@@ -229,6 +257,23 @@ def initialize_database() -> None:
                 """
             )
             connection.execute("PRAGMA user_version = 6")
+            version = 6
+
+        if version == 6:
+            connection.execute(
+                """
+                CREATE TABLE daily_goal_overrides (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    day TEXT NOT NULL UNIQUE,
+                    duration_seconds INTEGER,
+                    is_rest_day INTEGER NOT NULL CHECK (is_rest_day IN (0, 1)),
+                    CHECK ((is_rest_day = 1 AND duration_seconds IS NULL)
+                        OR (is_rest_day = 0 AND duration_seconds IS NOT NULL
+                            AND duration_seconds > 0))
+                )
+                """
+            )
+            connection.execute("PRAGMA user_version = 7")
 
 
 def _read_default_daily_goal(connection: sqlite3.Connection, day: date) -> DefaultDailyGoal | None:
@@ -295,6 +340,91 @@ def set_default_daily_goal(
             (result.id, result.effective_from.isoformat(), result.duration_seconds),
         )
         return result
+
+
+def _read_daily_goal_override(connection: sqlite3.Connection, day: date) -> DailyGoalOverride | None:
+    row = connection.execute(
+        "SELECT id, day, duration_seconds, is_rest_day FROM daily_goal_overrides WHERE day = ?",
+        (day.isoformat(),),
+    ).fetchone()
+    return DailyGoalOverride(
+        id=row["id"], day=date.fromisoformat(row["day"]),
+        duration_seconds=row["duration_seconds"], is_rest_day=bool(row["is_rest_day"]),
+    ) if row else None
+
+
+def read_daily_goal_override(day: date) -> DailyGoalOverride | None:
+    """Consulta somente a exceção da data, sem alterar o cronômetro."""
+    if type(day) is not date:
+        raise ValueError("Informe uma data válida para consultar o planejamento.")
+    with _connection() as connection:
+        return _read_daily_goal_override(connection, day)
+
+
+def read_daily_plan(day: date) -> DailyPlan:
+    """Lê a meta padrão e a exceção da data na mesma visão do banco."""
+    if type(day) is not date:
+        raise ValueError("Informe uma data válida para consultar o planejamento.")
+    with _connection() as connection:
+        return DailyPlan(
+            day=day, default_goal=_read_default_daily_goal(connection, day),
+            override=_read_daily_goal_override(connection, day),
+        )
+
+
+def _validate_daily_goal_override_expected(day: date, expected: DailyGoalOverride | None) -> None:
+    if type(day) is not date:
+        raise ValueError("Informe uma data válida para configurar o planejamento.")
+    if expected is not None and not isinstance(expected, DailyGoalOverride):
+        raise ValueError("Cancele e consulte novamente a data antes de salvar o planejamento.")
+    if expected is not None and expected.day != day:
+        raise ValueError("Consulte a data escolhida antes de salvar seu planejamento.")
+
+
+def set_daily_goal_override(
+    day: date,
+    duration_seconds: int | None,
+    is_rest_day: bool,
+    expected: DailyGoalOverride | None,
+) -> DailyGoalOverride:
+    """Define uma meta específica ou descanso, preservando a meta padrão e os estudos."""
+    _validate_daily_goal_override_expected(day, expected)
+    if type(is_rest_day) is not bool:
+        raise ValueError("Escolha entre meta específica e dia de descanso.")
+    if is_rest_day:
+        if duration_seconds is not None:
+            raise ValueError("Um dia de descanso não deve ter uma meta de estudo.")
+    elif type(duration_seconds) is not int or not 0 < duration_seconds <= 2**63 - 1:
+        raise ValueError("A meta da data deve ser uma duração inteira positiva válida.")
+    with _connection(write=True) as connection:
+        current = _read_daily_goal_override(connection, day)
+        if current != expected:
+            raise ValueError("O planejamento da data mudou desde a leitura. Cancele e consulte novamente.")
+        if current is not None:
+            if current.duration_seconds == duration_seconds and current.is_rest_day == is_rest_day:
+                return current
+            connection.execute(
+                "UPDATE daily_goal_overrides SET duration_seconds = ?, is_rest_day = ? WHERE id = ?",
+                (duration_seconds, int(is_rest_day), current.id),
+            )
+            return replace(current, duration_seconds=duration_seconds, is_rest_day=is_rest_day)
+        result = DailyGoalOverride(str(uuid4()), day, duration_seconds, is_rest_day)
+        connection.execute(
+            "INSERT INTO daily_goal_overrides (id, day, duration_seconds, is_rest_day) VALUES (?, ?, ?, ?)",
+            (result.id, result.day.isoformat(), result.duration_seconds, int(result.is_rest_day)),
+        )
+        return result
+
+
+def clear_daily_goal_override(day: date, expected: DailyGoalOverride | None) -> None:
+    """Remove somente a exceção confirmada; a data volta a usar sua meta padrão."""
+    _validate_daily_goal_override_expected(day, expected)
+    with _connection(write=True) as connection:
+        current = _read_daily_goal_override(connection, day)
+        if current != expected:
+            raise ValueError("O planejamento da data mudou desde a leitura. Cancele e consulte novamente.")
+        if current is not None:
+            connection.execute("DELETE FROM daily_goal_overrides WHERE id = ?", (current.id,))
 
 
 def add_subject(name: str) -> None:
@@ -539,6 +669,7 @@ def read_study_overview(*, at: datetime | None = None, tz: tzinfo | None = None)
             subjects=tuple((row["id"], row["name"]) for row in subjects),
             active_session=active, day=day, total_seconds=total,
             goal=_read_default_daily_goal(connection, day),
+            goal_override=_read_daily_goal_override(connection, day),
         )
 
 

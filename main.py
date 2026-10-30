@@ -12,9 +12,12 @@ from notifications import (
     windows_notifications_available,
 )
 from storage import (
+    DailyGoalOverride,
+    DailyPlan,
     DefaultDailyGoal,
     add_subject,
     create_manual_session,
+    clear_daily_goal_override,
     delete_finished_session,
     delete_subject,
     finish_session,
@@ -23,11 +26,13 @@ from storage import (
     list_recorded_study_types,
     pause_session,
     read_session_history,
+    read_daily_plan,
     read_study_overview,
     read_subject_deletion_preview,
     rename_subject,
     resume_session,
     set_default_daily_goal,
+    set_daily_goal_override,
     start_next_phase,
     start_session,
     update_finished_session,
@@ -110,6 +115,14 @@ def parse_manual_period(date_text: str, time_text: str, duration_text: str) -> t
     return start, seconds
 
 
+def parse_plan_date(text: str) -> date:
+    """Lê uma data do calendário sem reinterpretá-la como um instante UTC."""
+    try:
+        return datetime.strptime(text.strip(), "%d/%m/%Y").date()
+    except ValueError:
+        raise ValueError("Informe a data como DD/MM/AAAA.") from None
+
+
 async def main(page: ft.Page) -> None:
     page.title = "Streakly — prova de conceito"
     page.padding = 16
@@ -127,6 +140,14 @@ async def main(page: ft.Page) -> None:
     goal_original_text = ""
     goal_editing = False
     goal_saving = False
+    today_override: DailyGoalOverride | None = None
+    date_plan: DailyPlan | None = None
+    date_editing = False
+    date_saving = False
+    date_loading = False
+    date_request: object | None = None
+    date_original_text = ""
+    date_original_seconds: int | None = None
     history_offset = 0
     history_has_more = False
     history_loaded = False
@@ -166,6 +187,16 @@ async def main(page: ft.Page) -> None:
     goal_settings_status = ft.Text()
     goal_duration = ft.TextField(label="Meta diária padrão (HH:MM)", hint_text="Ex.: 03:00")
     goal_message = ft.Text()
+    plan_date = ft.TextField(label="Data do planejamento (DD/MM/AAAA)", width=260)
+    plan_status = ft.Text("Consulte uma data para ver seu planejamento.")
+    plan_mode = ft.Dropdown(
+        label="Planejamento da data", value="default",
+        options=[ft.DropdownOption(key="default", text="Usar meta padrão"),
+                 ft.DropdownOption(key="custom", text="Meta específica"),
+                 ft.DropdownOption(key="rest", text="Dia de descanso")],
+    )
+    plan_duration = ft.TextField(label="Meta da data (HH:MM)", hint_text="Ex.: 02:00")
+    plan_message = ft.Text()
     home_session = ft.Text()
     home_subjects = ft.ListView(
         controls=[ft.Text("Nenhuma matéria cadastrada ainda.")],
@@ -325,7 +356,7 @@ async def main(page: ft.Page) -> None:
 
     async def refresh_state(*, reload_study_types: bool = False) -> None:
         nonlocal session, subject_options, settings_subject, ready, today, today_seconds
-        nonlocal subject_selection_removed, recorded_study_types, daily_goal
+        nonlocal subject_selection_removed, recorded_study_types, daily_goal, today_override
         previous = session
         overview = await asyncio.to_thread(read_study_overview, at=datetime.now(UTC))
         if reload_study_types:
@@ -377,6 +408,7 @@ async def main(page: ft.Page) -> None:
         session = active
         today, today_seconds = overview.day, overview.total_seconds
         daily_goal = overview.goal
+        today_override = overview.goal_override
         ready = True
         notice = alert_tracker.observe(active)
         if notice:
@@ -428,19 +460,29 @@ async def main(page: ft.Page) -> None:
             shortcut.disabled = locked
         daily_date.value = today.strftime("%d/%m/%Y") if today else ""
         daily_total.value = format_duration(today_seconds) if ready else "Total indisponível"
-        goal_progress.visible = ready and daily_goal is not None
+        effective_seconds = (today_override.duration_seconds if today_override else
+                             daily_goal.duration_seconds if daily_goal else None)
+        is_rest_day = today_override is not None and today_override.is_rest_day
+        goal_progress.visible = ready and effective_seconds is not None and not is_rest_day
         if not ready:
             goal_summary.value = goal_settings_status.value = "Meta indisponível."
             goal_remaining.value = ""
-        elif daily_goal is None:
-            goal_summary.value = goal_settings_status.value = "Meta diária ainda não configurada."
-            goal_remaining.value = ""
         else:
-            goal_summary.value = goal_settings_status.value = f"Meta de hoje: {format_duration(daily_goal.duration_seconds)}"
-            goal_progress.value = min(1.0, today_seconds / daily_goal.duration_seconds)
-            remaining = max(0, daily_goal.duration_seconds - today_seconds)
-            goal_remaining.value = (f"Faltam {format_duration(ceil(remaining))} para atingir a meta."
-                                    if remaining else "Meta atingida hoje!")
+            goal_settings_status.value = (f"Meta padrão vigente: {format_duration(daily_goal.duration_seconds)}"
+                                          if daily_goal else "Meta padrão ainda não configurada.")
+            if is_rest_day:
+                goal_summary.value = "Dia de descanso hoje."
+                goal_remaining.value = "Você pode registrar estudos normalmente."
+            elif effective_seconds is None:
+                goal_summary.value = "Meta diária ainda não configurada."
+                goal_remaining.value = ""
+            else:
+                label = "Meta específica de hoje" if today_override else "Meta de hoje"
+                goal_summary.value = f"{label}: {format_duration(effective_seconds)}"
+                goal_progress.value = min(1.0, today_seconds / effective_seconds)
+                remaining = max(0, effective_seconds - today_seconds)
+                goal_remaining.value = (f"Faltam {format_duration(ceil(remaining))} para atingir a meta."
+                                        if remaining else "Meta atingida hoje!")
         goal_settings_button.disabled = goal_edit_button.disabled = locked or delete_dialog is not None
         goal_edit_button.visible = not goal_editing
         goal_form.visible = goal_editing
@@ -449,6 +491,34 @@ async def main(page: ft.Page) -> None:
         goal_cancel_button.disabled = goal_saving
         if goal_editing and goal_edit_day != today:
             goal_message.value = "O dia mudou. Cancele e abra novamente a configuração da meta."
+        date_matches = False
+        if date_plan:
+            try:
+                date_matches = parse_plan_date(plan_date.value or "") == date_plan.day
+            except ValueError:
+                pass
+            stamp = date_plan.day.strftime("%d/%m/%Y")
+            if date_plan.is_rest_day:
+                plan_status.value = f"{stamp}: dia de descanso."
+            elif date_plan.effective_seconds is not None:
+                source = "Meta específica" if date_plan.override else "Meta padrão vigente"
+                plan_status.value = f"{stamp} · {source}: {format_duration(date_plan.effective_seconds)}"
+            else:
+                plan_status.value = f"{stamp}: nenhuma meta configurada."
+        else:
+            plan_status.value = "Consulte uma data para ver seu planejamento."
+        plan_form.visible = date_editing
+        plan_edit_button.visible = date_plan is not None and not date_editing
+        plan_edit_button.disabled = locked or not date_matches or delete_dialog is not None
+        plan_query_button.disabled = locked or date_loading or date_saving or delete_dialog is not None
+        plan_date.disabled = locked or date_loading or date_saving or delete_dialog is not None
+        plan_mode.disabled = plan_duration.disabled = locked or date_saving or delete_dialog is not None
+        plan_duration.visible = plan_mode.value == "custom"
+        plan_save_button.disabled = (locked or date_saving or history_loading or not date_matches
+                                     or delete_dialog is not None or not date_editing)
+        plan_cancel_button.disabled = date_saving or delete_busy
+        plan_date.error_text = ("A data foi alterada. Consulte a data informada antes de salvar."
+                                if date_editing and not date_matches else None)
         history_locked = locked or history_loading or delete_dialog is not None
         timing_editable = editing_session is None or editing_session.source == "manual"
         history_nav_button.disabled = history_loading or manual_saving or delete_dialog is not None
@@ -558,6 +628,139 @@ async def main(page: ft.Page) -> None:
         )
         if connected and page.app_visible:
             page.update()
+
+    def fill_date_editor(event=None) -> None:
+        nonlocal date_editing, date_original_text, date_original_seconds
+        if busy or not ready or date_plan is None or delete_dialog is not None:
+            return
+        try:
+            if parse_plan_date(plan_date.value or "") != date_plan.day:
+                return
+        except ValueError:
+            return
+        override = date_plan.override
+        plan_mode.value = "rest" if override and override.is_rest_day else "custom" if override else "default"
+        date_original_seconds = (override.duration_seconds if override and not override.is_rest_day else
+                                 date_plan.default_goal.duration_seconds if date_plan.default_goal else None)
+        date_original_text = format_duration(date_original_seconds)[:-3] if date_original_seconds else ""
+        plan_duration.value = date_original_text
+        plan_message.value = ""
+        date_editing = True
+        render()
+
+    async def query_date_plan(event=None) -> None:
+        nonlocal busy, ready, date_loading, date_request, date_plan
+        if busy or not ready or date_loading or date_saving or delete_dialog is not None:
+            return
+        try:
+            selected_day = parse_plan_date(plan_date.value or "")
+        except ValueError as error:
+            plan_message.value = str(error)
+            render()
+            return
+        request = object()
+        date_request = request
+        busy = date_loading = True
+        result = None
+        render()
+        async with state_lock:
+            try:
+                result = await asyncio.to_thread(read_daily_plan, selected_day)
+            except (sqlite3.Error, OSError, ValueError):
+                plan_message.value = "Não foi possível consultar o planejamento. Tente novamente."
+            finally:
+                current_request = date_request is request
+                if current_request:
+                    date_request = None
+                busy = date_loading = False
+                render()
+        if result is not None and current_request and connected:
+            date_plan = result
+            plan_date.value = selected_day.strftime("%d/%m/%Y")
+            fill_date_editor()
+
+    def cancel_date_editor(event) -> None:
+        nonlocal date_editing, date_request
+        if not date_saving and not delete_busy:
+            date_request = None
+            date_editing = False
+            plan_message.value = ""
+            render()
+
+    async def save_date_plan(event) -> None:
+        nonlocal busy, ready, date_saving, date_editing, date_plan
+        if (busy or not ready or date_saving or history_loading or not date_editing or date_plan is None
+                or delete_dialog is not None):
+            return
+        selected = date_plan
+        try:
+            if parse_plan_date(plan_date.value or "") != selected.day:
+                raise ValueError("A data foi alterada. Consulte a data informada antes de salvar.")
+            mode = plan_mode.value
+            if mode not in ("default", "custom", "rest"):
+                raise ValueError("Escolha o planejamento da data.")
+            seconds = None
+            if mode == "custom":
+                seconds = (date_original_seconds
+                           if date_original_seconds and plan_duration.value == date_original_text
+                           else parse_study_duration(plan_duration.value or ""))
+        except ValueError as error:
+            plan_message.value = str(error)
+            render()
+            return
+
+        if mode == "default" and selected.override is not None:
+            def clear_selected(expected: DailyGoalOverride) -> None:
+                clear_daily_goal_override(expected.day, expected)
+
+            async def update_cleared_plan() -> None:
+                nonlocal date_plan, date_editing
+                date_editing = False
+                date_plan = None
+                plan_message.value = ""
+                date_plan = await asyncio.to_thread(read_daily_plan, selected.day)
+
+            show_delete_confirmation(
+                "Voltar à meta padrão?",
+                [ft.Text(f"Data: {selected.day:%d/%m/%Y}"),
+                 ft.Text("A configuração específica desta data será removida."),
+                 ft.Text("A data voltará a usar a meta padrão vigente. Seus estudos serão preservados.")],
+                clear_selected, selected.override, "Configuração da data removida",
+                "Não foi possível remover a configuração. Tente novamente.",
+                confirm_label="Usar meta padrão", after_save=update_cleared_plan, reload_history=False,
+            )
+            return
+
+        busy = date_saving = True
+        saved = False
+        render()
+        async with state_lock:
+            try:
+                if mode == "default":
+                    await asyncio.to_thread(clear_daily_goal_override, selected.day, selected.override)
+                else:
+                    await asyncio.to_thread(set_daily_goal_override, selected.day, seconds, mode == "rest", selected.override)
+                saved = True
+                date_editing = False
+                date_plan = None
+                message.value = "Planejamento da data salvo."
+                date_plan = await asyncio.to_thread(read_daily_plan, selected.day)
+                await refresh_state()
+            except ValueError as error:
+                if saved:
+                    ready = False
+                    message.value = f"Planejamento salvo, mas a tela não pôde ser atualizada: {error}"
+                else:
+                    plan_message.value = str(error)
+            except (sqlite3.Error, OSError):
+                if saved:
+                    ready = False
+                    message.value = "Planejamento salvo, mas a tela não pôde ser atualizada."
+                else:
+                    plan_message.value = "Não foi possível salvar o planejamento. Tente novamente."
+            finally:
+                busy = date_saving = False
+                render()
 
     def open_goal_editor(event=None) -> None:
         nonlocal goal_editing, goal_expected, goal_edit_day, goal_original_text
@@ -840,7 +1043,9 @@ async def main(page: ft.Page) -> None:
                 dialog.open = False
 
     def show_delete_confirmation(title: str, summary: list[ft.Control], action, expected,
-                                 completed_text: str, failure_text: str) -> None:
+                                 completed_text: str, failure_text: str, *,
+                                 confirm_label: str = "Excluir definitivamente", after_save=None,
+                                 reload_history: bool = True) -> None:
         nonlocal delete_dialog
         if (busy or not ready or history_loading or delete_busy
                 or delete_dialog is not None or not connected or not page.app_visible):
@@ -874,6 +1079,8 @@ async def main(page: ft.Page) -> None:
                     deleted = True
                     close_delete_dialog(dialog)
                     message.value = f"{completed_text}."
+                    if after_save:
+                        await after_save()
                     await refresh_state(reload_study_types=True)
                 except ValueError as error:
                     if deleted:
@@ -894,14 +1101,14 @@ async def main(page: ft.Page) -> None:
                 finally:
                     busy = delete_busy = False
                     render()
-            if deleted:
+            if deleted and reload_history:
                 await load_history()
 
         dialog = ft.AlertDialog(
             modal=True, scrollable=True, title=ft.Text(title),
             content=ft.Column([*summary, error_message], tight=True),
             actions=[ft.TextButton("Cancelar", on_click=cancel_delete),
-                     ft.Button("Excluir definitivamente", on_click=confirm_delete)],
+                     ft.Button(confirm_label, on_click=confirm_delete)],
             on_dismiss=dismissed,
         )
         delete_dialog = dialog
@@ -1175,11 +1382,16 @@ async def main(page: ft.Page) -> None:
     goal_edit_button = ft.Button("Editar meta diária", on_click=open_goal_editor)
     goal_save_button = ft.Button("Salvar meta diária", on_click=save_goal)
     goal_cancel_button = ft.TextButton("Cancelar meta", on_click=cancel_goal_editor)
+    plan_query_button = ft.Button("Consultar data", on_click=query_date_plan)
+    plan_edit_button = ft.TextButton("Editar planejamento", on_click=fill_date_editor)
+    plan_save_button = ft.Button("Salvar planejamento", on_click=save_date_plan)
+    plan_cancel_button = ft.TextButton("Cancelar planejamento", on_click=cancel_date_editor)
     for field in (manual_date, manual_time, manual_duration):
         field.on_change = preview_manual_end
     subject_choice.on_select = choose_subject
     mode_choice.on_select = preset_choice.on_select = choose_mode_or_preset
     study_type.on_select = manual_study_type.on_select = choose_mode_or_preset
+    plan_mode.on_select = plan_date.on_change = choose_mode_or_preset
     for field in custom_fields:
         field.on_change = choose_mode_or_preset
 
@@ -1237,6 +1449,7 @@ async def main(page: ft.Page) -> None:
     goal_form = ft.Column(
         [goal_duration,
          ft.Text("A meta salva vale a partir de hoje. As metas dos dias anteriores serão preservadas."),
+         ft.Text("Uma meta específica ou descanso na data tem prioridade sobre a meta padrão."),
          goal_message, ft.Row([goal_save_button, goal_cancel_button], wrap=True)],
         visible=False, horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
     )
@@ -1246,24 +1459,36 @@ async def main(page: ft.Page) -> None:
         expand=True, visible=False, scroll=ft.ScrollMode.AUTO,
         horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
     )
+    plan_form = ft.Column(
+        [plan_mode, plan_duration,
+         ft.Text("Este planejamento vale somente para a data consultada. Não altera seus estudos."),
+         ft.Row([plan_save_button, plan_cancel_button], wrap=True)],
+        visible=False, horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+    )
+    calendar_panel = ft.Column(
+        [ft.Text("Calendário", size=20), ft.Row([plan_date, plan_query_button], wrap=True),
+         plan_status, plan_message, plan_edit_button, plan_form],
+        expand=True, visible=False, scroll=ft.ScrollMode.AUTO,
+        horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+    )
 
     def show_subjects(event) -> None:
-        history_panel.visible = settings_panel.visible = False
+        history_panel.visible = settings_panel.visible = calendar_panel.visible = False
         home_panel.visible, subjects_panel.visible, timer_panel.visible = False, True, False
         page.update()
 
     def show_timer(event) -> None:
-        history_panel.visible = settings_panel.visible = False
+        history_panel.visible = settings_panel.visible = calendar_panel.visible = False
         home_panel.visible, subjects_panel.visible, timer_panel.visible = False, False, True
         page.update()
 
     def show_home(event) -> None:
-        history_panel.visible = settings_panel.visible = False
+        history_panel.visible = settings_panel.visible = calendar_panel.visible = False
         home_panel.visible, subjects_panel.visible, timer_panel.visible = True, False, False
         page.update()
 
     async def show_history(event) -> None:
-        settings_panel.visible = False
+        settings_panel.visible = calendar_panel.visible = False
         home_panel.visible = subjects_panel.visible = timer_panel.visible = False
         history_panel.visible = True
         if manual_open:
@@ -1272,10 +1497,22 @@ async def main(page: ft.Page) -> None:
             await load_history()
 
     def show_settings(event) -> None:
+        calendar_panel.visible = False
         home_panel.visible = subjects_panel.visible = timer_panel.visible = history_panel.visible = False
         settings_panel.visible = True
         open_goal_editor()
         page.update()
+
+    async def show_calendar(event) -> None:
+        home_panel.visible = subjects_panel.visible = timer_panel.visible = False
+        history_panel.visible = settings_panel.visible = False
+        calendar_panel.visible = True
+        if not plan_date.value and today:
+            plan_date.value = today.strftime("%d/%m/%Y")
+        if date_plan is None and not date_editing:
+            await query_date_plan()
+        else:
+            render()
 
     history_nav_button = ft.TextButton("Histórico", on_click=show_history)
 
@@ -1289,8 +1526,9 @@ async def main(page: ft.Page) -> None:
                     ft.TextButton("Cronômetro", on_click=show_timer),
                     history_nav_button,
                     ft.TextButton("Configurações", on_click=show_settings),
+                    ft.TextButton("Calendário", on_click=show_calendar),
                 ], wrap=True),
-                message, home_panel, subjects_panel, timer_panel, history_panel, settings_panel,
+                message, home_panel, subjects_panel, timer_panel, history_panel, settings_panel, calendar_panel,
             ],
             expand=True, horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
         ),
@@ -1342,9 +1580,10 @@ async def main(page: ft.Page) -> None:
             ticker = page.run_task(update_timer)
 
     def stop_updates(event=None) -> None:
-        nonlocal connected, delete_dialog, subject_delete_request
+        nonlocal connected, delete_dialog, subject_delete_request, date_request
         connected = False
         subject_delete_request = None
+        date_request = None
         if delete_dialog:
             delete_dialog.open = False
             delete_dialog = None

@@ -33,7 +33,7 @@ class DailyGoalTests(TemporaryDatabaseTest):
     def snapshot(self, *, include_goals=True):
         tables = ["subjects", "sessions", "session_events", "subject_timer_settings", "pomodoro_state"]
         if include_goals:
-            tables.append("daily_goal_defaults")
+            tables.extend(("daily_goal_defaults", "daily_goal_overrides"))
         return {table: self.execute(f"SELECT * FROM {table} ORDER BY 1") for table in tables}
 
     def set_goal(self, seconds, expected=None, *, day=29):
@@ -49,7 +49,7 @@ class DailyGoalTests(TemporaryDatabaseTest):
         self.assertIsNone(overview.goal)
         self.assertEqual(overview.total_seconds, 0)
         self.assertEqual(self.snapshot(), before)
-        self.assertEqual(self.execute("PRAGMA user_version"), [(6,)])
+        self.assertEqual(self.execute("PRAGMA user_version"), [(7,)])
 
     def test_effective_periods_preserve_past_and_unobserved_days_and_same_day_ids(self):
         first = self.set_goal(3600, day=20)
@@ -232,18 +232,20 @@ class DailyGoalTests(TemporaryDatabaseTest):
         active = storage.start_session(self.subject_id, "Aula", mode="pomodoro",
                                        focus_seconds=10, break_seconds=5, at=at(100))
         active = storage.pause_session(active.id, at=at(105))
+        self.execute("DROP TABLE daily_goal_overrides")
         self.execute("DROP TABLE daily_goal_defaults")
         self.execute("PRAGMA user_version = 5")
         before = self.snapshot(include_goals=False)
         storage.initialize_database()
         storage.initialize_database()
         self.assertEqual(self.snapshot(include_goals=False), before)
-        self.assertEqual(self.execute("PRAGMA user_version"), [(6,)])
+        self.assertEqual(self.execute("PRAGMA user_version"), [(7,)])
         self.assertEqual(self.execute("SELECT * FROM daily_goal_defaults"), [])
         self.assertEqual(storage.get_session(manual.id), manual)
         self.assertEqual(storage.get_active_session(), active)
 
     def test_failed_v5_migration_rolls_back_table_and_version_before_retry(self):
+        self.execute("DROP TABLE daily_goal_overrides")
         self.execute("DROP TABLE daily_goal_defaults")
         self.execute("PRAGMA user_version = 5")
         before = self.snapshot(include_goals=False)
@@ -266,7 +268,7 @@ class DailyGoalTests(TemporaryDatabaseTest):
         self.assertEqual(self.execute("SELECT name FROM sqlite_master WHERE name = 'daily_goal_defaults'"), [])
         self.assertEqual(self.snapshot(include_goals=False), before)
         storage.initialize_database()
-        self.assertEqual(self.execute("PRAGMA user_version"), [(6,)])
+        self.assertEqual(self.execute("PRAGMA user_version"), [(7,)])
 
     def test_another_process_recovers_goal_periods_and_preserves_study_data(self):
         first = self.set_goal(3600, day=20)

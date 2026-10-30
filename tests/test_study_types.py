@@ -63,7 +63,7 @@ class RecordedStudyTypeTests(TemporaryDatabaseTest):
 
     def test_empty_recorded_types_do_not_create_defaults_or_change_the_schema(self):
         self.assert_types_read_only([])
-        self.assertEqual(self.execute("PRAGMA user_version"), [(6,)])
+        self.assertEqual(self.execute("PRAGMA user_version"), [(7,)])
         self.assertEqual(self.row_counts(), (0, 0))
 
     def test_all_session_sources_reuse_exact_distinct_names_in_a_stable_order(self):

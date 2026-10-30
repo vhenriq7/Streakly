@@ -2,7 +2,7 @@
 
 Aplicativo pessoal de acompanhamento de estudos para **Windows e Android**, com registro de tempo, Pomodoro, metas diárias, ofensivas (streaks), calendário e estatísticas. Projeto **offline-first**: os dados são gravados localmente e sincronizados com a nuvem quando houver conexão.
 
-> **Status:** início do MVP offline. A versão 0.14.0 acrescenta meta diária padrão em Configurações e progresso no Início, preservando as metas dos dias anteriores. Os 134 testes automatizados e a integração com controles Flet passaram; falta conferir a configuração e o progresso na janela do Windows. As provas de conceito anteriores validaram persistência no Windows/Android, cronômetro progressivo no Windows e exibição do aviso de foco concluído no Windows, este confirmado pelo usuário em 28/10/2026. Avisos Android e com o app fechado seguem pendentes, nos marcos combinados.
+> **Status:** início do MVP offline. A versão 0.15.0 acrescenta metas específicas por data e dias de descanso na tela Calendário, com a regra aplicável a hoje no Início. Os 151 testes automatizados e a integração com controles Flet passaram; falta conferir os formulários na janela do Windows. As provas de conceito anteriores validaram persistência no Windows/Android, cronômetro progressivo no Windows e exibição do aviso de foco concluído no Windows, este confirmado pelo usuário em 28/10/2026. Avisos Android e com o app fechado seguem pendentes, nos marcos combinados.
 
 ## Funcionalidades planejadas
 
@@ -213,7 +213,15 @@ Em **Configurações**, defina uma duração positiva em **HH:MM**, como 03:00 p
 
 Conforme escolha do usuário em **29/10/2026**, uma mudança vale a partir de hoje e mantém as metas dos dias anteriores, inclusive quando o app ficou fechado. Navegar entre telas preserva o rascunho; cancelar não grava. Se o dia mudar ou outra instância alterar a meta durante a edição, cancele e reabra o formulário para conferir a configuração atual. Erros anteriores à gravação mantêm o preenchimento; erros posteriores informam que a meta já foi salva.
 
-O esquema 6 acrescenta o histórico de vigência da meta, sem modificar sessões ou eventos existentes. Os 134 testes automatizados e a integração com controles Flet passaram, usando bancos temporários. Para conferir no Windows, salve uma meta, veja o progresso no Início e reabra o app para confirmar a persistência. Falta essa conferência na janela nativa. Metas específicas por data, descanso, ofensivas e calendário ficam para as próximas etapas. Não há dependências novas nem APK nesta etapa.
+O esquema 6 acrescenta o histórico de vigência da meta, sem modificar sessões ou eventos existentes. Os 134 testes automatizados e a integração com controles Flet passaram, usando bancos temporários. Para conferir no Windows, salve uma meta, veja o progresso no Início e reabra o app para confirmar a persistência. Falta essa conferência na janela nativa. Metas específicas por data e descanso foram acrescentados na 0.15.0; ofensivas e a grade visual do calendário ficam para as próximas etapas. Não há dependências novas nem APK nesta etapa.
+
+### Metas por data e descanso — versão 0.15.0
+
+Em **Calendário**, informe uma data como **DD/MM/AAAA** e use **Consultar data**. Escolha entre usar a meta padrão vigente naquele dia, definir uma meta específica positiva em **HH:MM** ou marcar descanso. A configuração pode ser feita explicitamente para uma data passada ou futura e vale somente nela, sem alterar a vigência da meta padrão. Voltar a **Usar meta padrão** remove a exceção após confirmação; **Cancelar planejamento** não grava.
+
+O **Início** usa a exceção de hoje quando houver uma. Em descanso, mostra essa indicação sem barra de meta; qualquer estudo realizado continua no total diário e no Histórico. **Configurações** mantém separada a meta padrão vigente. O cálculo de ofensivas e a grade visual do calendário ainda não fazem parte desta etapa.
+
+Mudar a data digitada exige consultar novamente antes de salvar. Navegar preserva o rascunho; alterações concorrentes são recusadas e falhas após gravar informam que a configuração já foi salva. O esquema 7 acrescenta as exceções por data, preservando metas padrão e estudos existentes. Os 151 testes automatizados e a integração com controles Flet passaram, usando bancos temporários. Para conferir no Windows, configure uma exceção para hoje, veja o Início, experimente Cancelar e reabra o app. Falta essa conferência na janela nativa; não há dependências novas nem APK.
 
 ## Princípios de desenvolvimento
 

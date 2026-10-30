@@ -60,7 +60,7 @@ class SubjectRenameTests(TemporaryDatabaseTest):
         self.assertEqual(storage.get_active_session(), replace(active, subject_name="Álgebra e funções 🚀"))
         self.assertEqual(storage.get_subject_timer_settings(subject_id), settings)
         self.assertEqual(self.execute("PRAGMA foreign_key_check"), [])
-        self.assertEqual(self.execute("PRAGMA user_version"), [(6,)])
+        self.assertEqual(self.execute("PRAGMA user_version"), [(7,)])
 
     def test_options_history_and_overview_show_the_new_name_without_changing_daily_time(self):
         manual, progressive, active = self.related_sessions()
