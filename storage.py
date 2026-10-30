@@ -39,6 +39,17 @@ class HistoryPage:
     has_more: bool
 
 
+@dataclass(frozen=True)
+class SubjectDeletionPreview:
+    id: str
+    name: str
+    sessions: tuple[StudySession, ...]
+
+    @property
+    def total_seconds(self) -> float:
+        return sum((session.duration_seconds for session in self.sessions), 0.0)
+
+
 def database_path() -> Path:
     # Preserva o banco já usado no Windows, inclusive durante o desenvolvimento.
     if os.name == "nt" and os.environ.get("LOCALAPPDATA"):
@@ -230,6 +241,59 @@ def rename_subject(subject_id: str, expected_name: str, new_name: str) -> None:
         if row["name"] == name:
             return
         connection.execute("UPDATE subjects SET name = ? WHERE id = ?", (name, subject_id))
+
+
+def _read_subject_deletion_preview(
+    connection: sqlite3.Connection, subject_id: str,
+) -> SubjectDeletionPreview:
+    subject = connection.execute(
+        "SELECT id, name FROM subjects WHERE id = ?", (subject_id,),
+    ).fetchone()
+    if subject is None:
+        raise ValueError("A matéria não foi encontrada. Atualize a lista de matérias.")
+    rows = connection.execute(
+        "SELECT id, status FROM sessions WHERE subject_id = ? ORDER BY id", (subject_id,),
+    ).fetchall()
+    if any(row["status"] != "finished" for row in rows):
+        raise ValueError("Finalize a sessão ativa desta matéria antes de excluí-la.")
+    return SubjectDeletionPreview(
+        id=subject["id"], name=subject["name"],
+        sessions=tuple(_read_session(connection, row["id"]) for row in rows),
+    )
+
+
+def read_subject_deletion_preview(subject_id: str) -> SubjectDeletionPreview:
+    """Lê os dados da confirmação sem alterar sessões ou consolidar prazos."""
+    if not isinstance(subject_id, str) or not subject_id:
+        raise ValueError("Escolha uma matéria cadastrada para excluir.")
+    with _connection() as connection:
+        return _read_subject_deletion_preview(connection, subject_id)
+
+
+def delete_subject(expected: SubjectDeletionPreview) -> None:
+    """Exclui matéria, estudos e preferências juntos após validar a confirmação."""
+    if (not isinstance(expected, SubjectDeletionPreview)
+            or not isinstance(expected.id, str) or not expected.id):
+        raise ValueError("Escolha uma matéria cadastrada para excluir.")
+    with _connection(write=True) as connection:
+        current = _read_subject_deletion_preview(connection, expected.id)
+        if current != expected:
+            raise ValueError(
+                "A matéria ou seus estudos mudaram desde a leitura. "
+                "Cancele e abra novamente a confirmação antes de excluir."
+            )
+        # Mantém as chaves estrangeiras ativas e remove as dependências primeiro.
+        connection.execute(
+            "DELETE FROM pomodoro_state WHERE session_id IN "
+            "(SELECT id FROM sessions WHERE subject_id = ?)", (current.id,),
+        )
+        connection.execute(
+            "DELETE FROM session_events WHERE session_id IN "
+            "(SELECT id FROM sessions WHERE subject_id = ?)", (current.id,),
+        )
+        connection.execute("DELETE FROM sessions WHERE subject_id = ?", (current.id,))
+        connection.execute("DELETE FROM subject_timer_settings WHERE subject_id = ?", (current.id,))
+        connection.execute("DELETE FROM subjects WHERE id = ?", (current.id,))
 
 
 def list_subjects() -> list[str]:

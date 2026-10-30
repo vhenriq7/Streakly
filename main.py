@@ -15,12 +15,14 @@ from storage import (
     add_subject,
     create_manual_session,
     delete_finished_session,
+    delete_subject,
     finish_session,
     get_subject_timer_settings,
     initialize_database,
     pause_session,
     read_session_history,
     read_study_overview,
+    read_subject_deletion_preview,
     rename_subject,
     resume_session,
     start_next_phase,
@@ -97,6 +99,7 @@ async def main(page: ft.Page) -> None:
     session: StudySession | None = None
     subject_options: list[tuple[str, str]] = []
     settings_subject: str | None = None
+    subject_selection_removed = False
     today: date | None = None
     today_seconds = 0.0
     history_offset = 0
@@ -109,6 +112,7 @@ async def main(page: ft.Page) -> None:
     original_period_texts: tuple[str, str, str] | None = None
     delete_dialog: ft.AlertDialog | None = None
     delete_busy = False
+    subject_delete_request: object | None = None
     renaming_subject: tuple[str, str] | None = None
     rename_saving = False
     busy = False
@@ -239,7 +243,13 @@ async def main(page: ft.Page) -> None:
         def choose_rename(event) -> None:
             open_subject_rename(subject_id, name)
 
-        return ft.Row([ft.Text(name, expand=True), ft.TextButton("Renomear", on_click=choose_rename)])
+        async def choose_delete(event) -> None:
+            await request_subject_delete(subject_id)
+
+        return ft.Row([
+            ft.Text(name, expand=True), ft.TextButton("Renomear", on_click=choose_rename),
+            ft.TextButton("Excluir", on_click=choose_delete),
+        ])
 
     def fill_pomodoro_fields(settings) -> None:
         preset_choice.value = settings.preset
@@ -272,6 +282,7 @@ async def main(page: ft.Page) -> None:
 
     async def refresh_state() -> None:
         nonlocal session, subject_options, settings_subject, ready, today, today_seconds
+        nonlocal subject_selection_removed
         previous = session
         overview = await asyncio.to_thread(read_study_overview, at=datetime.now(UTC))
         choices, active = list(overview.subjects), overview.active_session
@@ -290,10 +301,29 @@ async def main(page: ft.Page) -> None:
                 ft.DropdownOption(key=subject_id, text=name)
                 for subject_id, name in choices
             ]
-        if manual_subject.value not in {subject_id for subject_id, _ in choices}:
-            manual_subject.value = choices[0][0] if choices else None
-        if subject_choice.value not in {subject_id for subject_id, _ in choices}:
-            subject_choice.value = choices[0][0] if choices else None
+        valid_subjects = {subject_id for subject_id, _ in choices}
+        if manual_subject.value not in valid_subjects:
+            if manual_open:
+                if manual_subject.value is not None:
+                    manual_subject.value = None
+                    manual_subject.error_text = "A matéria selecionada foi excluída. Escolha outra."
+            else:
+                manual_subject.value = choices[0][0] if choices else None
+                manual_subject.error_text = None
+        else:
+            manual_subject.error_text = None
+        if editing_session and editing_session.subject_id not in valid_subjects:
+            manual_message.value = "A matéria original foi excluída. Cancele a edição e atualize o Histórico."
+        if subject_choice.value not in valid_subjects:
+            if subject_choice.value is not None:
+                subject_selection_removed = True
+                subject_choice.value = None
+                subject_choice.error_text = "A matéria selecionada foi excluída. Escolha outra."
+            elif not subject_selection_removed:
+                subject_choice.value = choices[0][0] if choices else None
+        else:
+            subject_selection_removed = False
+            subject_choice.error_text = None
         if not active and subject_choice.value and settings_subject != subject_choice.value:
             settings = await asyncio.to_thread(get_subject_timer_settings, subject_choice.value)
             mode_choice.value = settings.mode
@@ -354,7 +384,9 @@ async def main(page: ft.Page) -> None:
             delete_dialog.actions[0].disabled = delete_busy
             delete_dialog.actions[1].disabled = locked or delete_busy
         manual_open_button.disabled = history_locked or not subject_options
-        manual_save_button.disabled = locked or manual_saving or not subject_options
+        editing_subject_removed = (editing_session is not None
+                                   and editing_session.subject_id not in dict(subject_options))
+        manual_save_button.disabled = locked or manual_saving or not subject_options or editing_subject_removed
         manual_cancel_button.disabled = manual_saving
         manual_save_button.content = "Salvar alterações" if editing_session else "Salvar registro manual"
         manual_title.value = "Editar sessão" if editing_session else "Adicionar sessão manual"
@@ -667,9 +699,10 @@ async def main(page: ft.Page) -> None:
             else:
                 dialog.open = False
 
-    def request_delete(record: StudySession) -> None:
+    def show_delete_confirmation(title: str, summary: list[ft.Control], action, expected,
+                                 completed_text: str, failure_text: str) -> None:
         nonlocal delete_dialog
-        if (busy or not ready or history_loading or manual_open or delete_busy
+        if (busy or not ready or history_loading or delete_busy
                 or delete_dialog is not None or not connected or not page.app_visible):
             return
         error_message = ft.Text()
@@ -697,15 +730,15 @@ async def main(page: ft.Page) -> None:
             render()
             async with state_lock:
                 try:
-                    await asyncio.to_thread(delete_finished_session, record)
+                    await asyncio.to_thread(action, expected)
                     deleted = True
                     close_delete_dialog(dialog)
-                    message.value = "Sessão excluída."
+                    message.value = f"{completed_text}."
                     await refresh_state()
                 except ValueError as error:
                     if deleted:
                         ready = False
-                        message.value = f"Sessão excluída, mas a tela não pôde ser atualizada: {error}"
+                        message.value = f"{completed_text}, mas a tela não pôde ser atualizada: {error}"
                     elif delete_dialog is dialog:
                         error_message.value = str(error)
                     else:
@@ -713,17 +746,31 @@ async def main(page: ft.Page) -> None:
                 except (sqlite3.Error, OSError):
                     if deleted:
                         ready = False
-                        message.value = "Sessão excluída, mas o total não pôde ser atualizado."
+                        message.value = f"{completed_text}, mas o total não pôde ser atualizado."
                     elif delete_dialog is dialog:
-                        error_message.value = "Não foi possível excluir a sessão. Tente novamente."
+                        error_message.value = failure_text
                     else:
-                        message.value = "Não foi possível excluir a sessão. Tente novamente."
+                        message.value = failure_text
                 finally:
                     busy = delete_busy = False
                     render()
             if deleted:
                 await load_history()
 
+        dialog = ft.AlertDialog(
+            modal=True, scrollable=True, title=ft.Text(title),
+            content=ft.Column([*summary, error_message], tight=True),
+            actions=[ft.TextButton("Cancelar", on_click=cancel_delete),
+                     ft.Button("Excluir definitivamente", on_click=confirm_delete)],
+            on_dismiss=dismissed,
+        )
+        delete_dialog = dialog
+        page.show_dialog(dialog)
+        render()
+
+    def request_delete(record: StudySession) -> None:
+        if manual_open:
+            return
         start = record.started_at.astimezone().strftime("%d/%m/%Y %H:%M:%S (%z)")
         end = record.ended_at.astimezone().strftime("%d/%m/%Y %H:%M:%S (%z)")
         origin = ("Registro manual" if record.source == "manual" else
@@ -736,20 +783,51 @@ async def main(page: ft.Page) -> None:
         ]
         if record.topic:
             summary.append(ft.Text(f"Assunto: {record.topic}"))
-        summary.extend([
-            ft.Text("A exclusão é permanente e remove esta sessão do Histórico e dos totais."),
-            error_message,
-        ])
-        dialog = ft.AlertDialog(
-            modal=True, scrollable=True, title=ft.Text("Excluir sessão?"),
-            content=ft.Column(summary, tight=True),
-            actions=[ft.TextButton("Cancelar", on_click=cancel_delete),
-                     ft.Button("Excluir definitivamente", on_click=confirm_delete)],
-            on_dismiss=dismissed,
+        summary.append(ft.Text("A exclusão é permanente e remove esta sessão do Histórico e dos totais."))
+        show_delete_confirmation(
+            "Excluir sessão?", summary, delete_finished_session, record,
+            "Sessão excluída", "Não foi possível excluir a sessão. Tente novamente.",
         )
-        delete_dialog = dialog
-        page.show_dialog(dialog)
+
+    async def request_subject_delete(subject_id: str) -> None:
+        nonlocal busy, ready, subject_delete_request
+        if (busy or not ready or history_loading or renaming_subject is not None
+                or delete_dialog is not None or subject_delete_request is not None
+                or not connected or not page.app_visible):
+            return
+        request = object()
+        subject_delete_request = request
+        preview = None
+        busy = True
         render()
+        async with state_lock:
+            try:
+                preview = await asyncio.to_thread(read_subject_deletion_preview, subject_id)
+            except ValueError as error:
+                message.value = str(error)
+            except (sqlite3.Error, OSError):
+                ready = False
+                message.value = "Não foi possível consultar os estudos da matéria. Tente novamente."
+            finally:
+                current_request = subject_delete_request is request
+                if current_request:
+                    subject_delete_request = None
+                busy = False
+                render()
+        if (preview is None or not current_request or not connected or not page.app_visible
+                or not subjects_panel.visible):
+            return
+        summary = [
+            ft.Text(preview.name, size=20, weight=ft.FontWeight.BOLD),
+            ft.Text(f"Sessões que serão excluídas: {len(preview.sessions)}"),
+            ft.Text(f"Tempo de estudo que será removido: {format_duration(preview.total_seconds)}"),
+            ft.Text("A exclusão é permanente: remove a matéria, todos os seus estudos e suas preferências."),
+            ft.Text("O Histórico e os totais serão recalculados. Essa ação não pode ser desfeita."),
+        ]
+        show_delete_confirmation(
+            "Excluir matéria e seus estudos?", summary, delete_subject, preview,
+            "Matéria e seus estudos excluídos", "Não foi possível excluir a matéria. Tente novamente.",
+        )
 
     async def load_history(offset: int = 0) -> None:
         nonlocal history_loading, history_loaded, history_offset, history_has_more, history_list
@@ -868,6 +946,10 @@ async def main(page: ft.Page) -> None:
     async def save_manual(event) -> None:
         nonlocal busy, manual_saving, manual_open, ready, editing_session, original_period_texts
         if busy or not ready or manual_saving:
+            return
+        if editing_session and editing_session.subject_id not in dict(subject_options):
+            manual_message.value = "A matéria original foi excluída. Cancele a edição e atualize o Histórico."
+            render()
             return
         if not manual_subject.value:
             manual_message.value = "Cadastre e escolha uma matéria para a sessão."
@@ -1092,8 +1174,9 @@ async def main(page: ft.Page) -> None:
             ticker = page.run_task(update_timer)
 
     def stop_updates(event=None) -> None:
-        nonlocal connected, delete_dialog
+        nonlocal connected, delete_dialog, subject_delete_request
         connected = False
+        subject_delete_request = None
         if delete_dialog:
             delete_dialog.open = False
             delete_dialog = None

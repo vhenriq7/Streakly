@@ -2,7 +2,7 @@
 
 Aplicativo pessoal de acompanhamento de estudos para **Windows e Android**, com registro de tempo, Pomodoro, metas diárias, ofensivas (streaks), calendário e estatísticas. Projeto **offline-first**: os dados são gravados localmente e sincronizados com a nuvem quando houver conexão.
 
-> **Status:** início do MVP offline. A versão 0.11.0 acrescenta renomeação de matérias, preservando histórico, cronômetro e preferências. Os 101 testes automatizados e a integração com controles Flet passaram; falta conferir o formulário na janela do Windows. As provas de conceito anteriores validaram persistência no Windows/Android, cronômetro progressivo no Windows e exibição do aviso de foco concluído no Windows, este confirmado pelo usuário em 28/10/2026. Avisos Android e com o app fechado seguem pendentes, nos marcos combinados.
+> **Status:** início do MVP offline. A versão 0.12.0 acrescenta exclusão permanente de matérias e de todos os seus estudos, após confirmação, conforme escolha do usuário. Os 112 testes automatizados e a integração com controles Flet passaram; falta conferir o diálogo na janela do Windows. As provas de conceito anteriores validaram persistência no Windows/Android, cronômetro progressivo no Windows e exibição do aviso de foco concluído no Windows, este confirmado pelo usuário em 28/10/2026. Avisos Android e com o app fechado seguem pendentes, nos marcos combinados.
 
 ## Funcionalidades planejadas
 
@@ -187,7 +187,17 @@ Em **Matérias → Renomear**, altere o nome e use **Salvar nome**. Espaços nas
 
 A alteração preserva identificadores, sessões, eventos, tempo de estudo e preferências. Se outra instância tiver renomeado a matéria, a gravação é recusada: cancele, confira a lista atualizada e reabra Renomear. Uma edição de sessão aberta antes da renomeação também deve ser cancelada e reaberta para carregar os dados atuais. Erros antes de gravar mantêm o formulário; erros posteriores informam que o nome já foi alterado.
 
-O esquema permanece na versão 5, sem dependências novas ou APK. Os 101 testes automatizados e a integração com controles Flet passaram, usando bancos temporários. Para conferir no Windows, renomeie uma matéria com estudos, verifique o Histórico e o cronômetro, feche e reabra o app. Falta essa conferência na janela nativa. A exclusão de matérias fica para uma etapa posterior, após definir a política para seus vínculos.
+O esquema permanece na versão 5, sem dependências novas ou APK. Os 101 testes automatizados e a integração com controles Flet passaram, usando bancos temporários. Para conferir no Windows, renomeie uma matéria com estudos, verifique o Histórico e o cronômetro, feche e reabra o app. Falta essa conferência na janela nativa. A exclusão de matérias foi acrescentada na versão 0.12.0, descrita abaixo.
+
+### Exclusão de matérias — versão 0.12.0
+
+Conforme escolha do usuário em **29/10/2026**, **Matérias → Excluir** remove permanentemente a matéria, todos os seus estudos, eventos e preferências. A confirmação mostra o nome, a quantidade de sessões e o tempo de estudo que será removido. **Cancelar** ou fechar o diálogo não grava; somente **Excluir definitivamente** executa a remoção. Não há lixeira ou desfazer nesta etapa.
+
+Uma matéria com sessão ativa exige **Finalizar** antes de excluir, inclusive se estiver pausada ou aguardando outra fase Pomodoro. Se o nome ou os estudos mudarem após abrir a confirmação, a exclusão é recusada: cancele e abra novamente para conferir os dados atuais. A leitura da confirmação não altera o banco. Após sucesso, o Histórico volta à primeira página e os totais são recalculados; outras matérias e sua sessão ativa permanecem preservadas. Falha na atualização da tela depois da gravação informa que a exclusão já ocorreu.
+
+Se a matéria selecionada em um rascunho tiver sido excluída, o app mantém os demais campos e pede outra matéria, sem escolher automaticamente. Uma edição de sessão removida mantém o preenchimento, mas bloqueia salvar: cancele e atualize o Histórico. Desconectar invalida confirmações ainda não aceitas e leituras de confirmação pendentes.
+
+O esquema continua na versão 5, sem dependências novas ou APK. Os 112 testes e a integração com controles Flet passaram, usando bancos temporários e sem excluir dados pessoais. Para conferir no Windows, abra a confirmação de uma matéria e use primeiro Cancelar. Confirme a exclusão somente em uma matéria cujos estudos realmente deseja remover; confira a lista, o Histórico e o total em Início, depois feche e reabra o app. Falta essa conferência na janela nativa.
 
 ## Princípios de desenvolvimento
 

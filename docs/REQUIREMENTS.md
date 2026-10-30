@@ -7,11 +7,11 @@ Aplicativo pessoal de estudos para **Windows e Android**, com experiência simpl
 ## 2. Matérias e classificação
 
 - Criar, renomear e excluir matérias.
-- **MVP 0.11.0:** renomear pelo identificador da matéria, preservando sessões, eventos, duração, preferências e sessão ativa. Remover espaços nas extremidades e recusar nome vazio; nomes iguais não unem matérias. Atualizar nomes na interface e no Histórico carregado, mantendo sua página. Cancelar não grava; recusar sobrescrever uma alteração de nome feita desde a leitura. Erro anterior à gravação mantém o formulário; erro posterior informa que a alteração já ocorreu. A exclusão de matérias permanece para etapa posterior à definição da política abaixo.
+- **MVP 0.11.0:** renomear pelo identificador da matéria, preservando sessões, eventos, duração, preferências e sessão ativa. Remover espaços nas extremidades e recusar nome vazio; nomes iguais não unem matérias. Atualizar nomes na interface e no Histórico carregado, mantendo sua página. Cancelar não grava; recusar sobrescrever uma alteração de nome feita desde a leitura. Erro anterior à gravação mantém o formulário; erro posterior informa que a alteração já ocorreu.
 - Criar e personalizar tipos de atividade por matéria ou catálogo reutilizável: **leitura, aula, exercícios, revisão** e outros.
 - Informar assunto/tópico opcional dentro de uma matéria (ex.: Python → laços → exercícios).
 - Cada sessão armazena matéria, tipo de estudo, assunto opcional, início, fim e duração efetiva.
-- Exclusões de matérias com histórico exigem confirmação e política explícita para preservar ou remover vínculos históricos; não apagar sessões silenciosamente.
+- **MVP 0.12.0 — escolha do usuário em 29/10/2026:** excluir permanentemente a matéria e todos os seus estudos, eventos e preferências após confirmação com nome, quantidade de sessões e duração total removida. Exigir finalização de qualquer sessão ativa dessa matéria, inclusive pausada ou aguardando fase Pomodoro. Recusar confirmação desatualizada se nome, conteúdo ou conjunto de estudos mudar desde a leitura. Cancelar, fechar ou desconectar antes de confirmar não exclui. Remover tudo em uma transação, recalcular totais e retornar o Histórico à primeira página, preservando outras matérias e a sessão ativa delas. Falha posterior à gravação informa que a exclusão já ocorreu; não oferecer repetição. Rascunhos cuja matéria foi removida exigem seleção explícita de outra; edições de sessões removidas preservam o preenchimento e bloqueiam salvar até cancelar e atualizar o Histórico.
 
 ## 3. Registro de tempo
 
