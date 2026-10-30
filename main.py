@@ -12,6 +12,7 @@ from notifications import (
     windows_notifications_available,
 )
 from storage import (
+    DefaultDailyGoal,
     add_subject,
     create_manual_session,
     delete_finished_session,
@@ -26,6 +27,7 @@ from storage import (
     read_subject_deletion_preview,
     rename_subject,
     resume_session,
+    set_default_daily_goal,
     start_next_phase,
     start_session,
     update_finished_session,
@@ -119,6 +121,12 @@ async def main(page: ft.Page) -> None:
     subject_selection_removed = False
     today: date | None = None
     today_seconds = 0.0
+    daily_goal: DefaultDailyGoal | None = None
+    goal_expected: DefaultDailyGoal | None = None
+    goal_edit_day: date | None = None
+    goal_original_text = ""
+    goal_editing = False
+    goal_saving = False
     history_offset = 0
     history_has_more = False
     history_loaded = False
@@ -152,6 +160,12 @@ async def main(page: ft.Page) -> None:
     )
     daily_date = ft.Text()
     daily_total = ft.Text("Carregando…", size=40, weight=ft.FontWeight.BOLD)
+    goal_summary = ft.Text()
+    goal_progress = ft.ProgressBar(value=0, visible=False)
+    goal_remaining = ft.Text()
+    goal_settings_status = ft.Text()
+    goal_duration = ft.TextField(label="Meta diária padrão (HH:MM)", hint_text="Ex.: 03:00")
+    goal_message = ft.Text()
     home_session = ft.Text()
     home_subjects = ft.ListView(
         controls=[ft.Text("Nenhuma matéria cadastrada ainda.")],
@@ -311,7 +325,7 @@ async def main(page: ft.Page) -> None:
 
     async def refresh_state(*, reload_study_types: bool = False) -> None:
         nonlocal session, subject_options, settings_subject, ready, today, today_seconds
-        nonlocal subject_selection_removed, recorded_study_types
+        nonlocal subject_selection_removed, recorded_study_types, daily_goal
         previous = session
         overview = await asyncio.to_thread(read_study_overview, at=datetime.now(UTC))
         if reload_study_types:
@@ -362,6 +376,7 @@ async def main(page: ft.Page) -> None:
             settings_subject = subject_choice.value
         session = active
         today, today_seconds = overview.day, overview.total_seconds
+        daily_goal = overview.goal
         ready = True
         notice = alert_tracker.observe(active)
         if notice:
@@ -413,6 +428,27 @@ async def main(page: ft.Page) -> None:
             shortcut.disabled = locked
         daily_date.value = today.strftime("%d/%m/%Y") if today else ""
         daily_total.value = format_duration(today_seconds) if ready else "Total indisponível"
+        goal_progress.visible = ready and daily_goal is not None
+        if not ready:
+            goal_summary.value = goal_settings_status.value = "Meta indisponível."
+            goal_remaining.value = ""
+        elif daily_goal is None:
+            goal_summary.value = goal_settings_status.value = "Meta diária ainda não configurada."
+            goal_remaining.value = ""
+        else:
+            goal_summary.value = goal_settings_status.value = f"Meta de hoje: {format_duration(daily_goal.duration_seconds)}"
+            goal_progress.value = min(1.0, today_seconds / daily_goal.duration_seconds)
+            remaining = max(0, daily_goal.duration_seconds - today_seconds)
+            goal_remaining.value = (f"Faltam {format_duration(ceil(remaining))} para atingir a meta."
+                                    if remaining else "Meta atingida hoje!")
+        goal_settings_button.disabled = goal_edit_button.disabled = locked or delete_dialog is not None
+        goal_edit_button.visible = not goal_editing
+        goal_form.visible = goal_editing
+        goal_duration.disabled = locked or goal_saving
+        goal_save_button.disabled = locked or goal_saving or delete_dialog is not None or goal_edit_day != today
+        goal_cancel_button.disabled = goal_saving
+        if goal_editing and goal_edit_day != today:
+            goal_message.value = "O dia mudou. Cancele e abra novamente a configuração da meta."
         history_locked = locked or history_loading or delete_dialog is not None
         timing_editable = editing_session is None or editing_session.source == "manual"
         history_nav_button.disabled = history_loading or manual_saving or delete_dialog is not None
@@ -522,6 +558,68 @@ async def main(page: ft.Page) -> None:
         )
         if connected and page.app_visible:
             page.update()
+
+    def open_goal_editor(event=None) -> None:
+        nonlocal goal_editing, goal_expected, goal_edit_day, goal_original_text
+        if busy or not ready or goal_saving or goal_editing or delete_dialog is not None:
+            return
+        goal_expected, goal_edit_day = daily_goal, today
+        goal_original_text = format_duration(daily_goal.duration_seconds)[:-3] if daily_goal else ""
+        goal_duration.value = goal_original_text
+        goal_message.value = ""
+        goal_editing = True
+        render()
+
+    def cancel_goal_editor(event) -> None:
+        nonlocal goal_editing
+        if not goal_saving:
+            goal_editing = False
+            render()
+
+    async def save_goal(event) -> None:
+        nonlocal busy, ready, goal_saving, goal_editing
+        if (busy or not ready or goal_saving or not goal_editing or goal_edit_day is None
+                or delete_dialog is not None):
+            return
+        try:
+            seconds = (goal_expected.duration_seconds
+                       if goal_expected and goal_duration.value == goal_original_text
+                       else parse_study_duration(goal_duration.value or ""))
+        except ValueError as error:
+            goal_message.value = str(error)
+            render()
+            return
+        busy = goal_saving = True
+        saved = False
+        render()
+        async with state_lock:
+            try:
+                await asyncio.to_thread(
+                    set_default_daily_goal, seconds, goal_expected, goal_edit_day, at=datetime.now(UTC),
+                )
+                saved = True
+                goal_editing = False
+                message.value = "Meta diária salva."
+                await refresh_state()
+            except ValueError as error:
+                if saved:
+                    ready = False
+                    message.value = f"Meta salva, mas a tela não pôde ser atualizada: {error}"
+                else:
+                    goal_message.value = str(error)
+                    try:
+                        await refresh_state()
+                    except (sqlite3.Error, OSError, ValueError):
+                        ready = False
+            except (sqlite3.Error, OSError):
+                if saved:
+                    ready = False
+                    message.value = "Meta salva, mas a tela não pôde ser atualizada."
+                else:
+                    goal_message.value = "Não foi possível salvar a meta. Tente novamente."
+            finally:
+                busy = goal_saving = False
+                render()
 
     async def save_subject(event) -> None:
         nonlocal busy, ready
@@ -1073,6 +1171,10 @@ async def main(page: ft.Page) -> None:
     manual_open_button = ft.TextButton("Adicionar sessão", on_click=open_manual)
     manual_save_button = ft.Button("Salvar registro manual", on_click=save_manual)
     manual_cancel_button = ft.TextButton("Cancelar", on_click=cancel_manual)
+    goal_settings_button = ft.TextButton("Configurar meta diária", on_click=lambda event: show_settings(event))
+    goal_edit_button = ft.Button("Editar meta diária", on_click=open_goal_editor)
+    goal_save_button = ft.Button("Salvar meta diária", on_click=save_goal)
+    goal_cancel_button = ft.TextButton("Cancelar meta", on_click=cancel_goal_editor)
     for field in (manual_date, manual_time, manual_duration):
         field.on_change = preview_manual_end
     subject_choice.on_select = choose_subject
@@ -1094,6 +1196,7 @@ async def main(page: ft.Page) -> None:
         [
             ft.Text("Tempo estudado hoje", size=20), daily_date, daily_total,
             ft.Text("Somando todas as matérias. Pausas e intervalos não contam."),
+            goal_summary, goal_progress, goal_remaining, goal_settings_button,
             ft.Text("Sessão em andamento", size=20), home_session, open_session_button,
             ft.Text("Minhas matérias", size=20), home_subjects,
         ],
@@ -1131,29 +1234,48 @@ async def main(page: ft.Page) -> None:
         ],
         expand=True, visible=False, horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
     )
+    goal_form = ft.Column(
+        [goal_duration,
+         ft.Text("A meta salva vale a partir de hoje. As metas dos dias anteriores serão preservadas."),
+         goal_message, ft.Row([goal_save_button, goal_cancel_button], wrap=True)],
+        visible=False, horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+    )
+    settings_panel = ft.Column(
+        [ft.Text("Configurações", size=20), ft.Text("Meta diária padrão", size=18),
+         goal_settings_status, goal_edit_button, goal_form],
+        expand=True, visible=False, scroll=ft.ScrollMode.AUTO,
+        horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+    )
 
     def show_subjects(event) -> None:
-        history_panel.visible = False
+        history_panel.visible = settings_panel.visible = False
         home_panel.visible, subjects_panel.visible, timer_panel.visible = False, True, False
         page.update()
 
     def show_timer(event) -> None:
-        history_panel.visible = False
+        history_panel.visible = settings_panel.visible = False
         home_panel.visible, subjects_panel.visible, timer_panel.visible = False, False, True
         page.update()
 
     def show_home(event) -> None:
-        history_panel.visible = False
+        history_panel.visible = settings_panel.visible = False
         home_panel.visible, subjects_panel.visible, timer_panel.visible = True, False, False
         page.update()
 
     async def show_history(event) -> None:
+        settings_panel.visible = False
         home_panel.visible = subjects_panel.visible = timer_panel.visible = False
         history_panel.visible = True
         if manual_open:
             render()
         else:
             await load_history()
+
+    def show_settings(event) -> None:
+        home_panel.visible = subjects_panel.visible = timer_panel.visible = history_panel.visible = False
+        settings_panel.visible = True
+        open_goal_editor()
+        page.update()
 
     history_nav_button = ft.TextButton("Histórico", on_click=show_history)
 
@@ -1166,8 +1288,9 @@ async def main(page: ft.Page) -> None:
                     ft.TextButton("Matérias", on_click=show_subjects),
                     ft.TextButton("Cronômetro", on_click=show_timer),
                     history_nav_button,
+                    ft.TextButton("Configurações", on_click=show_settings),
                 ], wrap=True),
-                message, home_panel, subjects_panel, timer_panel, history_panel,
+                message, home_panel, subjects_panel, timer_panel, history_panel, settings_panel,
             ],
             expand=True, horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
         ),

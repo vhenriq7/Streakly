@@ -2,7 +2,7 @@
 
 Aplicativo pessoal de acompanhamento de estudos para **Windows e Android**, com registro de tempo, Pomodoro, metas diárias, ofensivas (streaks), calendário e estatísticas. Projeto **offline-first**: os dados são gravados localmente e sincronizados com a nuvem quando houver conexão.
 
-> **Status:** início do MVP offline. A versão 0.13.0 acrescenta tipos de estudo personalizados no Cronômetro e no Histórico, com reutilização dos nomes já registrados. Os 120 testes automatizados e a integração com controles Flet passaram; falta conferir os campos na janela do Windows. As provas de conceito anteriores validaram persistência no Windows/Android, cronômetro progressivo no Windows e exibição do aviso de foco concluído no Windows, este confirmado pelo usuário em 28/10/2026. Avisos Android e com o app fechado seguem pendentes, nos marcos combinados.
+> **Status:** início do MVP offline. A versão 0.14.0 acrescenta meta diária padrão em Configurações e progresso no Início, preservando as metas dos dias anteriores. Os 134 testes automatizados e a integração com controles Flet passaram; falta conferir a configuração e o progresso na janela do Windows. As provas de conceito anteriores validaram persistência no Windows/Android, cronômetro progressivo no Windows e exibição do aviso de foco concluído no Windows, este confirmado pelo usuário em 28/10/2026. Avisos Android e com o app fechado seguem pendentes, nos marcos combinados.
 
 ## Funcionalidades planejadas
 
@@ -206,6 +206,14 @@ Em **Cronômetro → Tipo de estudo** ou no formulário de **Adicionar sessão/E
 As opções combinam Leitura, Aula, Exercícios e Revisão com os nomes já usados nos estudos, inclusive de outras matérias. O novo nome passa a ser reutilizável depois do primeiro registro e permanece após reabrir o app. Se seu último uso for excluído ou alterado, pode sair das sugestões na próxima atualização; uma seleção ou rascunho em andamento é preservado. Não há cadastro independente de tipos nesta etapa; gerenciamento de catálogo e personalização por matéria ficam para depois.
 
 Navegar entre telas preserva o preenchimento. O tipo da sessão ativa permanece bloqueado junto dos demais campos. Erros anteriores à gravação mantêm o formulário; erros posteriores informam que o registro já foi salvo. O esquema SQLite continua na versão 5, sem dependências novas ou APK. Os 120 testes e a integração com controles Flet passaram, usando bancos temporários. Para conferir no Windows, registre um tipo personalizado, veja-o no Histórico e reabra o app para reutilizá-lo. Falta essa conferência na janela nativa.
+
+### Meta diária padrão — versão 0.14.0
+
+Em **Configurações**, defina uma duração positiva em **HH:MM**, como 03:00 para três horas. Nenhuma meta é imposta antes da primeira configuração. O **Início** mostra a meta de hoje, a barra de progresso e o tempo restante ou **Meta atingida**, usando o total de estudo já calculado, sem contabilizar pausas. O cronômetro e os registros de estudo permanecem preservados.
+
+Conforme escolha do usuário em **29/10/2026**, uma mudança vale a partir de hoje e mantém as metas dos dias anteriores, inclusive quando o app ficou fechado. Navegar entre telas preserva o rascunho; cancelar não grava. Se o dia mudar ou outra instância alterar a meta durante a edição, cancele e reabra o formulário para conferir a configuração atual. Erros anteriores à gravação mantêm o preenchimento; erros posteriores informam que a meta já foi salva.
+
+O esquema 6 acrescenta o histórico de vigência da meta, sem modificar sessões ou eventos existentes. Os 134 testes automatizados e a integração com controles Flet passaram, usando bancos temporários. Para conferir no Windows, salve uma meta, veja o progresso no Início e reabra o app para confirmar a persistência. Falta essa conferência na janela nativa. Metas específicas por data, descanso, ofensivas e calendário ficam para as próximas etapas. Não há dependências novas nem APK nesta etapa.
 
 ## Princípios de desenvolvimento
 

@@ -66,7 +66,7 @@ Entidades candidatas:
 
 Adicionar `user_id` remoto para vincular todos os dados à conta, mesmo sendo de uso pessoal. Usar UUID para chaves criadas offline; timestamps em UTC e data de estudo calculada com política explícita de fuso local. Criar migrações versionadas.
 
-**Detalhes ainda a projetar:** regras para assuntos renomeados/excluídos, snapshots de metas concluídas e definição de conflitos. A representação Pomodoro da PoC está descrita na seção 5.
+**Detalhes ainda a projetar:** regras para assuntos renomeados/excluídos, metas específicas e descanso, e definição de conflitos. A representação Pomodoro e a vigência da meta padrão estão descritas na seção 5.
 
 ## 5. Contagem confiável de tempo
 
@@ -143,6 +143,12 @@ A remoção segue a ordem `pomodoro_state`, `session_events`, `sessions`, `subje
 
 `main.py` combina esses nomes com os quatro padrões e guarda as sugestões em memória: recarrega na abertura e nas ações de gravação, incorporando também nomes das páginas do Histórico, sem consulta extra a cada tick. Chaves com prefixo `type:` distinguem nomes reais da opção interna Personalizado, evitando colisão sem alterar o texto persistido. `resolve_study_type` valida a escolha e o nome novo antes da escrita. Atualizar opções preserva seleção e rascunho, inclusive quando o último uso deixa de existir; a sessão ativa mantém sua classificação bloqueada. A edição conserva o snapshot original e altera somente a classificação solicitada, mantendo eventos, duração e origem. As mensagens distinguem falha anterior e posterior ao commit.
 
+**Meta diária padrão 0.14.0:** conforme decisão do usuário em 29/10/2026, a nova meta vale a partir de hoje, preservando os dias anteriores. O esquema 6 acrescenta `daily_goal_defaults`, com UUID, data local de início da vigência e duração positiva em segundos. A migração é aditiva e transacional, sem alterar matérias, sessões ou eventos. `DefaultDailyGoal` representa essa configuração; `read_default_daily_goal` escolhe a vigência mais recente até a data consultada, retornando `None` antes da primeira. Não é necessário criar um registro por dia nem manter o app aberto para preservar metas anteriores.
+
+`read_study_overview` inclui a meta aplicável na mesma leitura consistente do dia e do total. `set_default_daily_goal` usa `BEGIN IMMEDIATE`, valida o dia local da edição e compara a meta esperada com a configuração atual antes de gravar. Uma mudança no mesmo dia preserva o UUID dessa vigência; uma mudança posterior inicia outro período. Configurações futuras em relação ao relógio local impedem gravar um período anterior. As consultas não criam vigências e as ações de estudo não modificam metas.
+
+A interface configura a duração em HH:MM e exibe o progresso no Início, sem impor uma meta inicial. A barra fica limitada a 100% e o restante nunca é negativo; a indicação de meta atingida usa o total efetivo. O formulário preserva o rascunho ao navegar, bloqueia envio duplicado e distingue falha antes/depois do commit. Mudança do dia ou conflito exige cancelar e reabrir a edição. Falha de leitura indica indisponibilidade, sem substituir dados por zero. Metas específicas por data, descanso, ofensivas e calendário permanecem para as próximas etapas.
+
 ## 6. Protocolo de sincronização
 
 1. Salvar alteração **em transação local**, junto com item na outbox.
@@ -193,6 +199,8 @@ O Android reutiliza `main.py`, `storage.py`, `timer.py` e `notifications.py`, co
 **Exclusão de matérias 0.12.0:** os 112 testes passaram, incluindo dependências, estados ativos protegidos, conflitos, rollback, concorrência e reabertura em outro processo. A integração com controles Flet e SQLite temporário verificou resumo, Cancelar, fechamento, reconexão, prévia tardia, falhas antes/depois da gravação, clique duplicado, rascunhos, totais e reabertura, além da regressão da exclusão de sessões. Falta conferir o diálogo na janela nativa do Windows. O esquema permanece na versão 5, sem dependências novas ou APK; os testes não excluíram dados do banco pessoal.
 
 **Tipos personalizados 0.13.0:** os 120 testes passaram, incluindo nomes sem colisão, Unicode, sugestões distintas, leitura sem gravações e reabertura em outro processo. A integração com controles Flet e SQLite temporário verificou progressivo, Pomodoro, criação manual, edição sem alterar eventos ou duração, reutilização, rascunhos, cancelamento e falhas antes/depois da gravação. Também conferiu que a consulta de tipos não ocorre no tick. Falta conferir os campos e a reutilização na janela nativa do Windows. Não houve migração, dependências novas ou APK; o banco pessoal não foi usado nos testes.
+
+**Meta diária padrão 0.14.0:** os 134 testes passaram, incluindo vigência entre dias, fusos, concorrência, rollback, leitura consistente de total/meta, migração 5→6 e reabertura em outro processo. A integração com controles Flet e SQLite temporário verificou ausência de meta inicial, validação, rascunhos, Cancelar, progresso, meta atingida, falhas antes/depois da gravação, clique duplicado, virada de dia, precisão e reabertura. Falta conferir a configuração e o progresso na janela nativa do Windows. O esquema 6 preserva os dados de estudo existentes; não houve dependências novas ou APK e o banco pessoal não foi usado nos testes.
 
 Antes do MVP completo:
 

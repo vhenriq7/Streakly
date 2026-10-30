@@ -253,7 +253,7 @@ class MigrationTests(TemporaryDatabaseTest):
         self.execute("PRAGMA user_version = 1")
         storage.initialize_database()
         storage.initialize_database()
-        self.assertEqual(self.execute("PRAGMA user_version"), [(5,)])
+        self.assertEqual(self.execute("PRAGMA user_version"), [(6,)])
         self.assertEqual(storage.list_subject_options(), [(original_id, "Python")])
         session = storage.start_session(original_id, "Leitura", at=at(0))
         self.assertEqual(session.subject_id, original_id)

@@ -53,11 +53,12 @@ Aplicativo pessoal de estudos para **Windows e Android**, com experiência simpl
 ## 5. Metas, descanso e ofensivas
 
 - Meta diária padrão configurável (por exemplo, 3 horas).
+- **MVP 0.14.0:** configurar uma meta positiva em HH:MM, sem valor obrigatório inicial. Exibir no Início a meta vigente, o progresso e o tempo restante ou a indicação de meta atingida, usando o total efetivo já calculado. Preservar o cronômetro e os estudos; cancelar não grava e navegar preserva o rascunho. Recusar gravação com configuração desatualizada ou após mudança do dia local; distinguir falha antes e depois de salvar. Metas específicas, descanso e ofensivas permanecem para etapas seguintes.
 - Permitir **meta específica por data**, que substitui a padrão apenas naquele dia.
 - Permitir **dias de descanso**: não aumentam nem quebram a ofensiva.
 - A ofensiva aumenta quando o tempo efetivo de estudo do dia atinge a meta aplicável; dias comuns abaixo da meta interrompem a sequência.
 - Exibir ofensiva atual e recorde, com indicador visual semelhante a uma chama.
-- **Regra recomendada a confirmar na implementação:** alterações na meta padrão não reescrevem retroativamente metas de dias já encerrados; armazenar a meta efetiva do dia para consistência histórica.
+- **Regra confirmada pelo usuário em 29/10/2026:** alterações na meta padrão valem a partir de hoje e não reescrevem metas dos dias anteriores. Preservar a vigência de cada configuração, inclusive durante períodos com o app fechado; antes da primeira configuração, não há meta aplicável. Se houver uma vigência posterior ao dia local atual, recusar a gravação para evitar reescrever o passado após retrocesso do relógio ou mudança de fuso.
 - Usar calendário e fuso local consistentes; definir comportamento para mudanças de fuso entre dispositivos.
 
 ## 6. Estatísticas e calendário

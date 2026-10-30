@@ -16,7 +16,7 @@ from timer import (
 )
 
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 NAMED_PRESETS = {
     "25/5": (1500, 300, 900, 4),
@@ -25,11 +25,19 @@ NAMED_PRESETS = {
 
 
 @dataclass(frozen=True)
+class DefaultDailyGoal:
+    id: str
+    effective_from: date
+    duration_seconds: int
+
+
+@dataclass(frozen=True)
 class StudyOverview:
     subjects: tuple[tuple[str, str], ...]
     active_session: StudySession | None
     day: date
     total_seconds: float
+    goal: DefaultDailyGoal | None = None
 
 
 @dataclass(frozen=True)
@@ -208,6 +216,85 @@ def initialize_database() -> None:
                 """
             )
             connection.execute("PRAGMA user_version = 5")
+            version = 5
+
+        if version == 5:
+            connection.execute(
+                """
+                CREATE TABLE daily_goal_defaults (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    effective_from TEXT NOT NULL UNIQUE,
+                    duration_seconds INTEGER NOT NULL CHECK (duration_seconds > 0)
+                )
+                """
+            )
+            connection.execute("PRAGMA user_version = 6")
+
+
+def _read_default_daily_goal(connection: sqlite3.Connection, day: date) -> DefaultDailyGoal | None:
+    row = connection.execute(
+        """
+        SELECT id, effective_from, duration_seconds FROM daily_goal_defaults
+        WHERE effective_from <= ? ORDER BY effective_from DESC LIMIT 1
+        """,
+        (day.isoformat(),),
+    ).fetchone()
+    return DefaultDailyGoal(
+        id=row["id"], effective_from=date.fromisoformat(row["effective_from"]),
+        duration_seconds=row["duration_seconds"],
+    ) if row else None
+
+
+def read_default_daily_goal(day: date) -> DefaultDailyGoal | None:
+    """Consulta a meta vigente na data, sem criar metas para dias não observados."""
+    if type(day) is not date:
+        raise ValueError("Informe uma data válida para consultar a meta diária.")
+    with _connection() as connection:
+        return _read_default_daily_goal(connection, day)
+
+
+def set_default_daily_goal(
+    duration_seconds: int,
+    expected: DefaultDailyGoal | None,
+    expected_day: date,
+    *,
+    at: datetime | None = None,
+    tz: tzinfo | None = None,
+) -> DefaultDailyGoal:
+    """Define a vigência de hoje sem reescrever metas de dias anteriores."""
+    if type(duration_seconds) is not int or not 0 < duration_seconds <= 2**63 - 1:
+        raise ValueError("A meta diária deve ser uma duração inteira positiva válida.")
+    if type(expected_day) is not date:
+        raise ValueError("Atualize a configuração antes de salvar a meta diária.")
+    if expected is not None and not isinstance(expected, DefaultDailyGoal):
+        raise ValueError("Atualize a configuração antes de salvar a meta diária.")
+    moment = as_utc(at if at is not None else datetime.now(UTC))
+    day = moment.astimezone(tz).date()
+    if expected_day != day:
+        raise ValueError("O dia mudou. Cancele e abra novamente a configuração da meta diária.")
+    with _connection(write=True) as connection:
+        if connection.execute(
+            "SELECT 1 FROM daily_goal_defaults WHERE effective_from > ? LIMIT 1",
+            (day.isoformat(),),
+        ).fetchone():
+            raise ValueError("Confira a data e o fuso do dispositivo: há uma meta com vigência posterior a hoje.")
+        current = _read_default_daily_goal(connection, day)
+        if current != expected:
+            raise ValueError("A meta diária mudou desde a leitura. Cancele e abra novamente a configuração.")
+        if current and current.duration_seconds == duration_seconds:
+            return current
+        if current and current.effective_from == day:
+            connection.execute(
+                "UPDATE daily_goal_defaults SET duration_seconds = ? WHERE id = ?",
+                (duration_seconds, current.id),
+            )
+            return replace(current, duration_seconds=duration_seconds)
+        result = DefaultDailyGoal(str(uuid4()), day, duration_seconds)
+        connection.execute(
+            "INSERT INTO daily_goal_defaults (id, effective_from, duration_seconds) VALUES (?, ?, ?)",
+            (result.id, result.effective_from.isoformat(), result.duration_seconds),
+        )
+        return result
 
 
 def add_subject(name: str) -> None:
@@ -425,7 +512,7 @@ def read_session_history(*, limit: int = 25, offset: int = 0) -> HistoryPage:
 
 
 def read_study_overview(*, at: datetime | None = None, tz: tzinfo | None = None) -> StudyOverview:
-    """Lê matérias, sessão ativa e total de hoje a partir da mesma visão do banco."""
+    """Lê matérias, sessão ativa, total e meta de hoje da mesma visão do banco."""
     moment = as_utc(at if at is not None else datetime.now(UTC))
     day, start, end = local_day_window(moment, tz)
     # Consolida um prazo vencido antes de abrir a visão consistente de leitura.
@@ -451,6 +538,7 @@ def read_study_overview(*, at: datetime | None = None, tz: tzinfo | None = None)
         return StudyOverview(
             subjects=tuple((row["id"], row["name"]) for row in subjects),
             active_session=active, day=day, total_seconds=total,
+            goal=_read_default_daily_goal(connection, day),
         )
 
 

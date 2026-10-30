@@ -266,6 +266,7 @@ with patch.object(storage, 'database_path', return_value=Path(sys.argv[1])):
             cycles_until_long_break=2, preset="custom",
         )
         self.execute("ALTER TABLE sessions DROP COLUMN source")
+        self.execute("DROP TABLE daily_goal_defaults")
         self.execute("PRAGMA user_version = 4")
         old_columns = ", ".join(row[1] for row in self.execute("PRAGMA table_info(sessions)"))
         old_sessions = self.execute(f"SELECT {old_columns} FROM sessions ORDER BY id")
@@ -275,7 +276,7 @@ with patch.object(storage, 'database_path', return_value=Path(sys.argv[1])):
         }
         storage.initialize_database()
         storage.initialize_database()
-        self.assertEqual(self.execute("PRAGMA user_version"), [(5,)])
+        self.assertEqual(self.execute("PRAGMA user_version"), [(6,)])
         self.assertEqual(self.execute(f"SELECT {old_columns} FROM sessions ORDER BY id"), old_sessions)
         for table, rows in other_tables.items():
             self.assertEqual(self.execute(f"SELECT * FROM {table} ORDER BY 1"), rows)

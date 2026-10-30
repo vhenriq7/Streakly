@@ -88,7 +88,7 @@ class SubjectDeletionTests(TemporaryDatabaseTest):
         self.assertEqual(storage.get_active_session(), active)
         self.assertEqual(dict(storage.list_subject_options())[duplicate_id], "Python")
         self.assertEqual(self.execute("PRAGMA foreign_key_check"), [])
-        self.assertEqual(self.execute("PRAGMA user_version"), [(5,)])
+        self.assertEqual(self.execute("PRAGMA user_version"), [(6,)])
         for record in records:
             with self.subTest(session=record.id):
                 with self.assertRaises(ValueError):
