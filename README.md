@@ -2,7 +2,7 @@
 
 Aplicativo pessoal de acompanhamento de estudos para **Windows e Android**, com registro de tempo, Pomodoro, metas diárias, ofensivas (streaks), calendário e estatísticas. Projeto **offline-first**: os dados são gravados localmente e sincronizados com a nuvem quando houver conexão.
 
-> **Status:** início do MVP offline. A versão 0.12.0 acrescenta exclusão permanente de matérias e de todos os seus estudos, após confirmação, conforme escolha do usuário. Os 112 testes automatizados e a integração com controles Flet passaram; falta conferir o diálogo na janela do Windows. As provas de conceito anteriores validaram persistência no Windows/Android, cronômetro progressivo no Windows e exibição do aviso de foco concluído no Windows, este confirmado pelo usuário em 28/10/2026. Avisos Android e com o app fechado seguem pendentes, nos marcos combinados.
+> **Status:** início do MVP offline. A versão 0.13.0 acrescenta tipos de estudo personalizados no Cronômetro e no Histórico, com reutilização dos nomes já registrados. Os 120 testes automatizados e a integração com controles Flet passaram; falta conferir os campos na janela do Windows. As provas de conceito anteriores validaram persistência no Windows/Android, cronômetro progressivo no Windows e exibição do aviso de foco concluído no Windows, este confirmado pelo usuário em 28/10/2026. Avisos Android e com o app fechado seguem pendentes, nos marcos combinados.
 
 ## Funcionalidades planejadas
 
@@ -198,6 +198,14 @@ Uma matéria com sessão ativa exige **Finalizar** antes de excluir, inclusive s
 Se a matéria selecionada em um rascunho tiver sido excluída, o app mantém os demais campos e pede outra matéria, sem escolher automaticamente. Uma edição de sessão removida mantém o preenchimento, mas bloqueia salvar: cancele e atualize o Histórico. Desconectar invalida confirmações ainda não aceitas e leituras de confirmação pendentes.
 
 O esquema continua na versão 5, sem dependências novas ou APK. Os 112 testes e a integração com controles Flet passaram, usando bancos temporários e sem excluir dados pessoais. Para conferir no Windows, abra a confirmação de uma matéria e use primeiro Cancelar. Confirme a exclusão somente em uma matéria cujos estudos realmente deseja remover; confira a lista, o Histórico e o total em Início, depois feche e reabra o app. Falta essa conferência na janela nativa.
+
+### Tipos de estudo personalizados — versão 0.13.0
+
+Em **Cronômetro → Tipo de estudo** ou no formulário de **Adicionar sessão/Editar** do Histórico, escolha **Personalizado…** e informe um nome, como Projeto prático. Espaços nas extremidades do novo nome são removidos e nomes vazios são recusados. O tipo é salvo ao iniciar o cronômetro ou salvar o registro; corrigir apenas essa classificação preserva horários, eventos, duração e origem.
+
+As opções combinam Leitura, Aula, Exercícios e Revisão com os nomes já usados nos estudos, inclusive de outras matérias. O novo nome passa a ser reutilizável depois do primeiro registro e permanece após reabrir o app. Se seu último uso for excluído ou alterado, pode sair das sugestões na próxima atualização; uma seleção ou rascunho em andamento é preservado. Não há cadastro independente de tipos nesta etapa; gerenciamento de catálogo e personalização por matéria ficam para depois.
+
+Navegar entre telas preserva o preenchimento. O tipo da sessão ativa permanece bloqueado junto dos demais campos. Erros anteriores à gravação mantêm o formulário; erros posteriores informam que o registro já foi salvo. O esquema SQLite continua na versão 5, sem dependências novas ou APK. Os 120 testes e a integração com controles Flet passaram, usando bancos temporários. Para conferir no Windows, registre um tipo personalizado, veja-o no Histórico e reabra o app para reutilizá-lo. Falta essa conferência na janela nativa.
 
 ## Princípios de desenvolvimento
 

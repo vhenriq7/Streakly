@@ -300,6 +300,16 @@ def list_subjects() -> list[str]:
     return [name for _, name in list_subject_options()]
 
 
+def list_recorded_study_types() -> list[str]:
+    """Lista os nomes já usados, sem alterar sessões ou normalizar o histórico."""
+    with _connection() as connection:
+        rows = connection.execute(
+            "SELECT DISTINCT study_type FROM sessions "
+            "ORDER BY study_type COLLATE NOCASE, study_type"
+        ).fetchall()
+    return [row["study_type"] for row in rows]
+
+
 def list_subject_options() -> list[tuple[str, str]]:
     with _connection() as connection:
         rows = connection.execute(

@@ -19,6 +19,7 @@ from storage import (
     finish_session,
     get_subject_timer_settings,
     initialize_database,
+    list_recorded_study_types,
     pause_session,
     read_session_history,
     read_study_overview,
@@ -40,6 +41,21 @@ from timer import (
 POMODORO_PRESETS = {"25/5": (25 * 60, 5 * 60), "50/10": (50 * 60, 10 * 60)}
 HISTORY_PAGE_SIZE = 25
 STUDY_TYPES = ("Leitura", "Aula", "Exercícios", "Revisão")
+CUSTOM_STUDY_TYPE_KEY = "custom"
+
+
+def resolve_study_type(choice: str | None, custom_name: str | None) -> str:
+    """Separa a opção da interface do nome que será salvo na sessão."""
+    if choice == CUSTOM_STUDY_TYPE_KEY:
+        name = (custom_name or "").strip()
+        if not name:
+            raise ValueError("Digite o nome do tipo de estudo personalizado.")
+        return name
+    if isinstance(choice, str) and choice.startswith("type:"):
+        name = choice.removeprefix("type:")
+        if name.strip():
+            return name
+    raise ValueError("Escolha um tipo de estudo.")
 
 
 def parse_local_start(date_text: str, time_text: str) -> datetime:
@@ -98,6 +114,7 @@ async def main(page: ft.Page) -> None:
 
     session: StudySession | None = None
     subject_options: list[tuple[str, str]] = []
+    recorded_study_types: list[str] = []
     settings_subject: str | None = None
     subject_selection_removed = False
     today: date | None = None
@@ -145,9 +162,9 @@ async def main(page: ft.Page) -> None:
     history_list = ft.ListView(expand=True, spacing=16)
     manual_subject = ft.Dropdown(label="Matéria da sessão no histórico")
     manual_study_type = ft.Dropdown(
-        label="Tipo de estudo da sessão no histórico", value="Leitura",
-        options=[ft.DropdownOption(key=name, text=name) for name in STUDY_TYPES],
+        label="Tipo de estudo da sessão no histórico", value="type:Leitura",
     )
+    manual_custom_type = ft.TextField(label="Nome do tipo personalizado no histórico", visible=False)
     manual_topic = ft.TextField(label="Assunto da sessão no histórico (opcional)")
     manual_date = ft.TextField(label="Data de início (DD/MM/AAAA)", width=230)
     manual_time = ft.TextField(label="Horário de início (HH:MM)", width=230)
@@ -158,9 +175,9 @@ async def main(page: ft.Page) -> None:
     manual_hint = ft.Text()
     subject_choice = ft.Dropdown(label="Matéria")
     study_type = ft.Dropdown(
-        label="Tipo de estudo", value="Leitura",
-        options=[ft.DropdownOption(key=name, text=name) for name in STUDY_TYPES],
+        label="Tipo de estudo", value="type:Leitura",
     )
+    custom_study_type = ft.TextField(label="Nome do tipo de estudo personalizado", visible=False)
     topic = ft.TextField(label="Assunto (opcional)", hint_text="Ex.: Funções")
     mode_choice = ft.Dropdown(
         label="Modo", value="progressive",
@@ -280,11 +297,25 @@ async def main(page: ft.Page) -> None:
                     long_break_seconds=long_pause * 60, cycles_until_long_break=count,
                     preset="custom")
 
-    async def refresh_state() -> None:
+    def fill_study_type_options(dropdown: ft.Dropdown) -> None:
+        names = list(dict.fromkeys([*STUDY_TYPES, *recorded_study_types]))
+        # Uma atualização das sugestões não deve substituir uma seleção do rascunho.
+        if dropdown.value and dropdown.value.startswith("type:"):
+            selected = dropdown.value.removeprefix("type:")
+            if selected not in names:
+                names.append(selected)
+        options = [(f"type:{name}", name) for name in names]
+        options.append((CUSTOM_STUDY_TYPE_KEY, "Personalizado…"))
+        if [(item.key, item.text) for item in dropdown.options] != options:
+            dropdown.options = [ft.DropdownOption(key=key, text=name) for key, name in options]
+
+    async def refresh_state(*, reload_study_types: bool = False) -> None:
         nonlocal session, subject_options, settings_subject, ready, today, today_seconds
-        nonlocal subject_selection_removed
+        nonlocal subject_selection_removed, recorded_study_types
         previous = session
         overview = await asyncio.to_thread(read_study_overview, at=datetime.now(UTC))
+        if reload_study_types:
+            recorded_study_types = await asyncio.to_thread(list_recorded_study_types)
         choices, active = list(overview.subjects), overview.active_session
         if choices != subject_options:
             subject_options = choices
@@ -350,7 +381,7 @@ async def main(page: ft.Page) -> None:
         locked = busy or not ready
         if session:
             subject_choice.value = session.subject_id
-            study_type.value = session.study_type
+            study_type.value = f"type:{session.study_type}"
             topic.value = session.topic or ""
             mode_choice.value = session.mode
             if session.pomodoro:
@@ -358,6 +389,11 @@ async def main(page: ft.Page) -> None:
         is_pomodoro = mode_choice.value == "pomodoro"
         phase = session.pomodoro if session else None
         waiting = phase is not None and phase.state == "ready"
+        for dropdown in (study_type, manual_study_type):
+            fill_study_type_options(dropdown)
+        custom_study_type.visible = study_type.value == CUSTOM_STUDY_TYPE_KEY
+        custom_study_type.disabled = locked or active
+        manual_custom_type.visible = manual_study_type.value == CUSTOM_STUDY_TYPE_KEY
 
         name_field.disabled = save_button.disabled = locked
         name_field.visible = save_button.visible = renaming_subject is None
@@ -396,7 +432,7 @@ async def main(page: ft.Page) -> None:
             if timing_editable else
             "Os horários e as pausas registrados pelo cronômetro serão preservados."
         )
-        for field in (manual_subject, manual_study_type, manual_topic,
+        for field in (manual_subject, manual_study_type, manual_custom_type, manual_topic,
                       manual_date, manual_time, manual_duration):
             field.disabled = locked or manual_saving
         for field in (manual_date, manual_time, manual_duration):
@@ -612,7 +648,7 @@ async def main(page: ft.Page) -> None:
                 message.value = success_message
                 if result.status == "finished":
                     message.value += f" Tempo de estudo: {format_duration(result.duration_seconds)}."
-                await refresh_state()
+                await refresh_state(reload_study_types=True)
             except ValueError as error:
                 message.value = str(error)
                 try:
@@ -635,6 +671,12 @@ async def main(page: ft.Page) -> None:
             page.update()
             return
         options = {"mode": mode_choice.value}
+        try:
+            selected_type = resolve_study_type(study_type.value, custom_study_type.value)
+        except ValueError as error:
+            message.value = str(error)
+            render()
+            return
         if mode_choice.value == "pomodoro":
             try:
                 options.update(pomodoro_options())
@@ -644,7 +686,7 @@ async def main(page: ft.Page) -> None:
                 return
         await perform(
             start_session, "Sessão iniciada.",
-            subject_choice.value, study_type.value, topic.value, **options,
+            subject_choice.value, selected_type, topic.value, **options,
         )
 
     async def pause(event) -> None:
@@ -734,7 +776,7 @@ async def main(page: ft.Page) -> None:
                     deleted = True
                     close_delete_dialog(dialog)
                     message.value = f"{completed_text}."
-                    await refresh_state()
+                    await refresh_state(reload_study_types=True)
                 except ValueError as error:
                     if deleted:
                         ready = False
@@ -842,6 +884,9 @@ async def main(page: ft.Page) -> None:
         render()
         try:
             result = await asyncio.to_thread(read_session_history, limit=HISTORY_PAGE_SIZE, offset=offset)
+            for record in result.sessions:
+                if record.study_type not in recorded_study_types:
+                    recorded_study_types.append(record.study_type)
             entries = [history_entry(record) for record in result.sessions]
             # Recriar a lista faz cada página começar no topo.
             history_list = ft.ListView(
@@ -910,8 +955,8 @@ async def main(page: ft.Page) -> None:
         manual_duration.value = "00:30"
         editing_session, original_period_texts = None, None
         manual_subject.value = subject_choice.value
-        manual_study_type.value = "Leitura"
-        manual_study_type.options = [ft.DropdownOption(key=name, text=name) for name in STUDY_TYPES]
+        manual_study_type.value = "type:Leitura"
+        manual_custom_type.value = ""
         manual_topic.value = ""
         manual_message.value = ""
         manual_open = True
@@ -926,11 +971,9 @@ async def main(page: ft.Page) -> None:
         manual_date.value, manual_time.value = start.strftime("%d/%m/%Y"), start.strftime("%H:%M")
         manual_duration.value = format_duration(record.duration_seconds)[:-3]
         original_period_texts = (manual_date.value, manual_time.value, manual_duration.value)
-        manual_subject.value, manual_study_type.value = record.subject_id, record.study_type
-        types = list(STUDY_TYPES)
-        if record.study_type not in types:
-            types.append(record.study_type)
-        manual_study_type.options = [ft.DropdownOption(key=name, text=name) for name in types]
+        manual_subject.value = record.subject_id
+        manual_study_type.value = f"type:{record.study_type}"
+        manual_custom_type.value = ""
         manual_topic.value = record.topic or ""
         manual_message.value = ""
         manual_open = True
@@ -958,6 +1001,7 @@ async def main(page: ft.Page) -> None:
         target = editing_session
         timing_changes = {}
         try:
+            selected_type = resolve_study_type(manual_study_type.value, manual_custom_type.value)
             if target:
                 if target.source == "manual":
                     start, seconds = form_period()
@@ -979,12 +1023,12 @@ async def main(page: ft.Page) -> None:
             try:
                 if target:
                     result = await asyncio.to_thread(
-                        update_finished_session, target, manual_subject.value, manual_study_type.value,
+                        update_finished_session, target, manual_subject.value, selected_type,
                         manual_topic.value, **timing_changes,
                     )
                 else:
                     result = await asyncio.to_thread(
-                        create_manual_session, manual_subject.value, manual_study_type.value,
+                        create_manual_session, manual_subject.value, selected_type,
                         start, seconds, manual_topic.value,
                     )
                 saved = True
@@ -992,7 +1036,7 @@ async def main(page: ft.Page) -> None:
                 editing_session, original_period_texts = None, None
                 action = "Alterações salvas" if target else "Registro manual salvo"
                 message.value = f"{action}. Tempo de estudo: {format_duration(result.duration_seconds)}."
-                await refresh_state()
+                await refresh_state(reload_study_types=True)
             except ValueError as error:
                 if saved:
                     ready = False
@@ -1033,6 +1077,7 @@ async def main(page: ft.Page) -> None:
         field.on_change = preview_manual_end
     subject_choice.on_select = choose_subject
     mode_choice.on_select = preset_choice.on_select = choose_mode_or_preset
+    study_type.on_select = manual_study_type.on_select = choose_mode_or_preset
     for field in custom_fields:
         field.on_change = choose_mode_or_preset
 
@@ -1058,7 +1103,7 @@ async def main(page: ft.Page) -> None:
         [
             ft.Text("Sessão de estudo", size=20),
             elapsed, timer_status, study_total, cycle_info, session_details,
-            subject_choice, study_type, topic, mode_choice, preset_choice, custom_panel,
+            subject_choice, study_type, custom_study_type, topic, mode_choice, preset_choice, custom_panel,
             ft.Row([start_button, pause_button, resume_button, next_button, finish_button], wrap=True),
             timer_note, notification_hint, test_notice_button,
         ],
@@ -1068,7 +1113,7 @@ async def main(page: ft.Page) -> None:
     manual_timing_row = ft.Row([manual_date, manual_time, manual_duration], wrap=True)
     manual_panel = ft.Column(
         [
-            manual_title, manual_subject, manual_study_type, manual_topic,
+            manual_title, manual_subject, manual_study_type, manual_custom_type, manual_topic,
             manual_timing_row, manual_hint,
             manual_end, manual_message, ft.Row([manual_save_button, manual_cancel_button], wrap=True),
         ],
@@ -1132,7 +1177,7 @@ async def main(page: ft.Page) -> None:
 
     try:
         await asyncio.to_thread(initialize_database)
-        await refresh_state()
+        await refresh_state(reload_study_types=True)
     except ValueError as error:
         message.value = str(error)
         render()
