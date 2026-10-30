@@ -110,9 +110,9 @@ def _study_intervals(
 def elapsed_seconds(events: Iterable[SessionEvent], now: datetime) -> float:
     """Soma os intervalos de estudo, incluindo o intervalo ainda em andamento."""
     return sum(
-        ((end - start).total_seconds() for start, end in _study_intervals(events, now)),
-        0.0,
-    )
+        (end - start for start, end in _study_intervals(events, now)),
+        timedelta(),
+    ).total_seconds()
 
 
 def format_duration(seconds: float) -> str:
@@ -152,12 +152,32 @@ def session_study_seconds_between(
     start, end, now = as_utc(start), as_utc(end), as_utc(now)
     if end <= start:
         raise ValueError("O fim do período precisa ser posterior ao início.")
-    total = 0.0
+    total = timedelta()
     for study_start, study_end in _study_intervals(session.events, _session_clock(session, now)):
         overlap_start = max(study_start, start)
         overlap_end = min(study_end, end, now)
-        total += max(0.0, (overlap_end - overlap_start).total_seconds())
-    return total
+        total += max(timedelta(), overlap_end - overlap_start)
+    return total.total_seconds()
+
+
+def session_study_seconds_by_day(
+    session: StudySession, start: datetime, end: datetime, now: datetime,
+    tz: tzinfo | None = None,
+) -> dict[date, float]:
+    """Reparte somente os intervalos efetivos entre os dias locais da janela."""
+    start, end, now = as_utc(start), as_utc(end), as_utc(now)
+    if end <= start:
+        raise ValueError("O fim do período precisa ser posterior ao início.")
+    totals: dict[date, timedelta] = {}
+    for study_start, study_end in _study_intervals(session.events, _session_clock(session, now)):
+        cursor = max(study_start, start)
+        limit = min(study_end, end, now)
+        while cursor < limit:
+            day, _, day_end = local_day_window(cursor, tz)
+            segment_end = min(limit, day_end)
+            totals[day] = totals.get(day, timedelta()) + (segment_end - cursor)
+            cursor = segment_end
+    return {day: duration.total_seconds() for day, duration in totals.items()}
 
 
 def local_day_window(

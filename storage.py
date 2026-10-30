@@ -12,7 +12,7 @@ from uuid import uuid4
 from timer import (
     PomodoroState, SessionEvent, StudySession, TimerSettings,
     as_utc, elapsed_seconds, local_day_window, pomodoro_remaining_seconds,
-    session_study_seconds_between,
+    session_study_seconds_between, session_study_seconds_by_day,
 )
 
 
@@ -59,6 +59,13 @@ class DailyPlan:
 
 
 @dataclass(frozen=True)
+class StreakBase:
+    day: date
+    current_before_today: int
+    best_before_today: int
+
+
+@dataclass(frozen=True)
 class StudyOverview:
     subjects: tuple[tuple[str, str], ...]
     active_session: StudySession | None
@@ -66,6 +73,7 @@ class StudyOverview:
     total_seconds: float
     goal: DefaultDailyGoal | None = None
     goal_override: DailyGoalOverride | None = None
+    streak_base: StreakBase | None = None
 
 
 @dataclass(frozen=True)
@@ -641,8 +649,76 @@ def read_session_history(*, limit: int = 25, offset: int = 0) -> HistoryPage:
         )
 
 
-def read_study_overview(*, at: datetime | None = None, tz: tzinfo | None = None) -> StudyOverview:
+def _read_streak_base(
+    connection: sqlite3.Connection, moment: datetime, tz: tzinfo | None,
+    *, active: StudySession | None = None,
+) -> StreakBase:
+    day, today_start, _ = local_day_window(moment, tz)
+    defaults = connection.execute(
+        "SELECT effective_from, duration_seconds FROM daily_goal_defaults "
+        "WHERE effective_from < ? ORDER BY effective_from", (day.isoformat(),),
+    ).fetchall()
+    overrides = connection.execute(
+        "SELECT day, duration_seconds, is_rest_day FROM daily_goal_overrides "
+        "WHERE day < ? ORDER BY day", (day.isoformat(),),
+    ).fetchall()
+    # Descanso isolado não inicia uma ofensiva; é preciso existir uma meta.
+    first_dates = ([date.fromisoformat(defaults[0]["effective_from"])] if defaults else [])
+    first_dates.extend(date.fromisoformat(row["day"]) for row in overrides if not row["is_rest_day"])
+    if not first_dates:
+        return StreakBase(day, 0, 0)
+    first_day = min(first_dates)
+    first_start = datetime.combine(first_day, datetime.min.time(), tzinfo=tz).astimezone(UTC)
+    candidates = connection.execute(
+        """
+        SELECT id FROM sessions
+        WHERE started_at < ? AND (ended_at IS NULL OR ended_at > ?)
+        ORDER BY started_at, id
+        """,
+        (today_start.isoformat(), first_start.isoformat()),
+    ).fetchall()
+    totals: dict[date, timedelta] = {}
+    for row in candidates:
+        session = active if active and row["id"] == active.id else _read_session(connection, row["id"])
+        for study_day, seconds in session_study_seconds_by_day(
+            session, first_start, today_start, moment, tz,
+        ).items():
+            totals[study_day] = totals.get(study_day, timedelta()) + timedelta(seconds=seconds)
+    default_periods = [(date.fromisoformat(row["effective_from"]), row["duration_seconds"])
+                       for row in defaults]
+    by_date = {date.fromisoformat(row["day"]): row for row in overrides}
+    current = best = 0
+    period_index = 0
+    default_seconds = None
+    cursor = first_day
+    while cursor < day:
+        while period_index < len(default_periods) and default_periods[period_index][0] <= cursor:
+            default_seconds = default_periods[period_index][1]
+            period_index += 1
+        override = by_date.get(cursor)
+        is_rest = override is not None and bool(override["is_rest_day"])
+        target = override["duration_seconds"] if override is not None else default_seconds
+        if not is_rest and target is not None:
+            current = current + 1 if totals.get(cursor, timedelta()).total_seconds() >= target else 0
+            best = max(best, current)
+        cursor += timedelta(days=1)
+    return StreakBase(day, current, best)
+
+
+def read_streak_base(*, at: datetime | None = None, tz: tzinfo | None = None) -> StreakBase:
+    """Calcula as ofensivas até ontem sem gravar dados ou consolidar Pomodoro."""
+    moment = as_utc(at if at is not None else datetime.now(UTC))
+    with _connection() as connection:
+        return _read_streak_base(connection, moment, tz)
+
+
+def read_study_overview(
+    *, at: datetime | None = None, tz: tzinfo | None = None,
+    include_streak_base: bool = False,
+) -> StudyOverview:
     """Lê matérias, sessão ativa, total e meta de hoje da mesma visão do banco."""
+    if type(include_streak_base) is not bool:
+        raise ValueError("Informe se a consulta deve incluir a ofensiva.")
     moment = as_utc(at if at is not None else datetime.now(UTC))
     day, start, end = local_day_window(moment, tz)
     # Consolida um prazo vencido antes de abrir a visão consistente de leitura.
@@ -660,16 +736,17 @@ def read_study_overview(*, at: datetime | None = None, tz: tzinfo | None = None)
             """,
             (end.isoformat(), start.isoformat()),
         ).fetchall()
-        total = 0.0
+        total = timedelta()
         for row in candidates:
             # Reutiliza a mesma sessão ativa que será exibida na interface.
             session = active if active and row["id"] == active.id else _read_session(connection, row["id"])
-            total += session_study_seconds_between(session, start, end, moment)
+            total += timedelta(seconds=session_study_seconds_between(session, start, end, moment))
         return StudyOverview(
             subjects=tuple((row["id"], row["name"]) for row in subjects),
-            active_session=active, day=day, total_seconds=total,
+            active_session=active, day=day, total_seconds=total.total_seconds(),
             goal=_read_default_daily_goal(connection, day),
             goal_override=_read_daily_goal_override(connection, day),
+            streak_base=_read_streak_base(connection, moment, tz, active=active) if include_streak_base else None,
         )
 
 

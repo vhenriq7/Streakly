@@ -15,6 +15,7 @@ from storage import (
     DailyGoalOverride,
     DailyPlan,
     DefaultDailyGoal,
+    StreakBase,
     add_subject,
     create_manual_session,
     clear_daily_goal_override,
@@ -148,6 +149,8 @@ async def main(page: ft.Page) -> None:
     date_request: object | None = None
     date_original_text = ""
     date_original_seconds: int | None = None
+    streak_base: StreakBase | None = None
+    streak_zone_key: tuple[date, str | None, timedelta | None] | None = None
     history_offset = 0
     history_has_more = False
     history_loaded = False
@@ -187,6 +190,9 @@ async def main(page: ft.Page) -> None:
     goal_settings_status = ft.Text()
     goal_duration = ft.TextField(label="Meta diária padrão (HH:MM)", hint_text="Ex.: 03:00")
     goal_message = ft.Text()
+    streak_current = ft.Text("Ofensiva indisponível.", size=18, weight=ft.FontWeight.BOLD)
+    streak_record = ft.Text("Recorde indisponível.")
+    streak_hint = ft.Text()
     plan_date = ft.TextField(label="Data do planejamento (DD/MM/AAAA)", width=260)
     plan_status = ft.Text("Consulte uma data para ver seu planejamento.")
     plan_mode = ft.Dropdown(
@@ -354,11 +360,23 @@ async def main(page: ft.Page) -> None:
         if [(item.key, item.text) for item in dropdown.options] != options:
             dropdown.options = [ft.DropdownOption(key=key, text=name) for key, name in options]
 
-    async def refresh_state(*, reload_study_types: bool = False) -> None:
+    async def refresh_state(*, reload_study_types: bool = False, reload_streak: bool = False) -> None:
         nonlocal session, subject_options, settings_subject, ready, today, today_seconds
         nonlocal subject_selection_removed, recorded_study_types, daily_goal, today_override
+        nonlocal streak_base, streak_zone_key
         previous = session
-        overview = await asyncio.to_thread(read_study_overview, at=datetime.now(UTC))
+        moment = datetime.now(UTC)
+        local_moment = moment.astimezone()
+        zone_key = (local_moment.date(), local_moment.tzname(), local_moment.utcoffset())
+        need_streak = reload_streak or streak_base is None or streak_zone_key != zone_key
+        if need_streak:
+            streak_base = None
+            streak_zone_key = None
+        overview = await asyncio.to_thread(read_study_overview, at=moment, include_streak_base=need_streak)
+        if need_streak:
+            if overview.streak_base is None:
+                raise ValueError("Não foi possível calcular a ofensiva.")
+            streak_base, streak_zone_key = overview.streak_base, zone_key
         if reload_study_types:
             recorded_study_types = await asyncio.to_thread(list_recorded_study_types)
         choices, active = list(overview.subjects), overview.active_session
@@ -483,6 +501,25 @@ async def main(page: ft.Page) -> None:
                 remaining = max(0, effective_seconds - today_seconds)
                 goal_remaining.value = (f"Faltam {format_duration(ceil(remaining))} para atingir a meta."
                                         if remaining else "Meta atingida hoje!")
+        streak_refresh_button.disabled = busy
+        if not ready or streak_base is None or streak_base.day != today:
+            streak_current.value = "Ofensiva indisponível."
+            streak_record.value = "Recorde indisponível."
+            streak_hint.value = ""
+        else:
+            today_counts = not is_rest_day and effective_seconds is not None and today_seconds >= effective_seconds
+            current = streak_base.current_before_today + int(today_counts)
+            best = max(streak_base.best_before_today, current)
+            streak_current.value = f"🔥 Ofensiva atual: {current} {'dia' if current == 1 else 'dias'}"
+            streak_record.value = f"Recorde: {best} {'dia' if best == 1 else 'dias'}"
+            if is_rest_day:
+                streak_hint.value = "Descanso mantém a sequência sem acrescentar um dia."
+            elif today_counts:
+                streak_hint.value = "Hoje já conta para a ofensiva."
+            elif effective_seconds is not None:
+                streak_hint.value = "Hoje ainda está em andamento. Atinja a meta para acrescentar um dia."
+            else:
+                streak_hint.value = "Dias sem meta não acrescentam nem interrompem a sequência."
         goal_settings_button.disabled = goal_edit_button.disabled = locked or delete_dialog is not None
         goal_edit_button.visible = not goal_editing
         goal_form.visible = goal_editing
@@ -629,6 +666,27 @@ async def main(page: ft.Page) -> None:
         if connected and page.app_visible:
             page.update()
 
+    def invalidate_streak_cache() -> None:
+        nonlocal streak_base, streak_zone_key
+        streak_base = None
+        streak_zone_key = None
+
+    async def refresh_streak_summary(event=None) -> None:
+        nonlocal busy, ready
+        if busy:
+            return
+        busy = True
+        render()
+        async with state_lock:
+            try:
+                await refresh_state(reload_streak=True)
+            except (sqlite3.Error, OSError, ValueError):
+                ready = False
+                message.value = "Não foi possível atualizar a ofensiva. Tente novamente."
+            finally:
+                busy = False
+                render()
+
     def fill_date_editor(event=None) -> None:
         nonlocal date_editing, date_original_text, date_original_seconds
         if busy or not ready or date_plan is None or delete_dialog is not None:
@@ -740,12 +798,13 @@ async def main(page: ft.Page) -> None:
                     await asyncio.to_thread(clear_daily_goal_override, selected.day, selected.override)
                 else:
                     await asyncio.to_thread(set_daily_goal_override, selected.day, seconds, mode == "rest", selected.override)
+                invalidate_streak_cache()
                 saved = True
                 date_editing = False
                 date_plan = None
                 message.value = "Planejamento da data salvo."
                 date_plan = await asyncio.to_thread(read_daily_plan, selected.day)
-                await refresh_state()
+                await refresh_state(reload_streak=True)
             except ValueError as error:
                 if saved:
                     ready = False
@@ -800,10 +859,11 @@ async def main(page: ft.Page) -> None:
                 await asyncio.to_thread(
                     set_default_daily_goal, seconds, goal_expected, goal_edit_day, at=datetime.now(UTC),
                 )
+                invalidate_streak_cache()
                 saved = True
                 goal_editing = False
                 message.value = "Meta diária salva."
-                await refresh_state()
+                await refresh_state(reload_streak=True)
             except ValueError as error:
                 if saved:
                     ready = False
@@ -944,12 +1004,13 @@ async def main(page: ft.Page) -> None:
         async with state_lock:
             try:
                 result = await asyncio.to_thread(action, *args, **kwargs)
+                invalidate_streak_cache()
                 saved = True
                 session = result if result.status != "finished" else None
                 message.value = success_message
                 if result.status == "finished":
                     message.value += f" Tempo de estudo: {format_duration(result.duration_seconds)}."
-                await refresh_state(reload_study_types=True)
+                await refresh_state(reload_study_types=True, reload_streak=True)
             except ValueError as error:
                 message.value = str(error)
                 try:
@@ -1076,12 +1137,13 @@ async def main(page: ft.Page) -> None:
             async with state_lock:
                 try:
                     await asyncio.to_thread(action, expected)
+                    invalidate_streak_cache()
                     deleted = True
                     close_delete_dialog(dialog)
                     message.value = f"{completed_text}."
                     if after_save:
                         await after_save()
-                    await refresh_state(reload_study_types=True)
+                    await refresh_state(reload_study_types=True, reload_streak=True)
                 except ValueError as error:
                     if deleted:
                         ready = False
@@ -1336,12 +1398,13 @@ async def main(page: ft.Page) -> None:
                         create_manual_session, manual_subject.value, selected_type,
                         start, seconds, manual_topic.value,
                     )
+                invalidate_streak_cache()
                 saved = True
                 manual_open = False
                 editing_session, original_period_texts = None, None
                 action = "Alterações salvas" if target else "Registro manual salvo"
                 message.value = f"{action}. Tempo de estudo: {format_duration(result.duration_seconds)}."
-                await refresh_state(reload_study_types=True)
+                await refresh_state(reload_study_types=True, reload_streak=True)
             except ValueError as error:
                 if saved:
                     ready = False
@@ -1382,6 +1445,7 @@ async def main(page: ft.Page) -> None:
     goal_edit_button = ft.Button("Editar meta diária", on_click=open_goal_editor)
     goal_save_button = ft.Button("Salvar meta diária", on_click=save_goal)
     goal_cancel_button = ft.TextButton("Cancelar meta", on_click=cancel_goal_editor)
+    streak_refresh_button = ft.TextButton("Atualizar ofensiva", on_click=refresh_streak_summary)
     plan_query_button = ft.Button("Consultar data", on_click=query_date_plan)
     plan_edit_button = ft.TextButton("Editar planejamento", on_click=fill_date_editor)
     plan_save_button = ft.Button("Salvar planejamento", on_click=save_date_plan)
@@ -1409,6 +1473,7 @@ async def main(page: ft.Page) -> None:
             ft.Text("Tempo estudado hoje", size=20), daily_date, daily_total,
             ft.Text("Somando todas as matérias. Pausas e intervalos não contam."),
             goal_summary, goal_progress, goal_remaining, goal_settings_button,
+            streak_current, streak_record, streak_hint, streak_refresh_button,
             ft.Text("Sessão em andamento", size=20), home_session, open_session_button,
             ft.Text("Minhas matérias", size=20), home_subjects,
         ],
@@ -1482,10 +1547,11 @@ async def main(page: ft.Page) -> None:
         home_panel.visible, subjects_panel.visible, timer_panel.visible = False, False, True
         page.update()
 
-    def show_home(event) -> None:
+    async def show_home(event) -> None:
         history_panel.visible = settings_panel.visible = calendar_panel.visible = False
         home_panel.visible, subjects_panel.visible, timer_panel.visible = True, False, False
-        page.update()
+        await refresh_streak_summary(event)
+        render()
 
     async def show_history(event) -> None:
         settings_panel.visible = calendar_panel.visible = False
@@ -1538,7 +1604,7 @@ async def main(page: ft.Page) -> None:
 
     try:
         await asyncio.to_thread(initialize_database)
-        await refresh_state(reload_study_types=True)
+        await refresh_state(reload_study_types=True, reload_streak=True)
     except ValueError as error:
         message.value = str(error)
         render()
