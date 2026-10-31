@@ -264,6 +264,10 @@ async def main(page: ft.Page) -> None:
         [ft.Text("Consulte um período para ver o tempo por matéria.")], spacing=8,
         horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
     )
+    statistics_types = ft.Column(
+        [ft.Text("Consulte um período para ver o tempo por tipo de estudo.")], spacing=8,
+        horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+    )
     home_session = ft.Text()
     home_subjects = ft.ListView(
         controls=[ft.Text("Nenhuma matéria cadastrada ainda.")],
@@ -810,6 +814,14 @@ async def main(page: ft.Page) -> None:
             ))
         return rows
 
+    def statistics_type_rows(result: PeriodStatistics) -> list[ft.Control]:
+        if not result.study_types:
+            return [ft.Text("Nenhum estudo neste período.")]
+        return [ft.Row(
+            [ft.Text(item.study_type, expand=True), ft.Text(format_duration(item.total_seconds))],
+            data=item.study_type, spacing=12,
+        ) for item in result.study_types]
+
     async def read_statistics_view(kind: str, start: date, end: date) -> None:
         nonlocal statistics_request, statistics_loading, statistics_data, statistics_kind, statistics_dirty
         request = object()
@@ -820,8 +832,10 @@ async def main(page: ft.Page) -> None:
             result = await asyncio.to_thread(read_period_statistics, start, end, at=datetime.now(UTC))
             if statistics_request is request and connected:
                 rows = statistics_subject_rows(result)
+                type_rows = statistics_type_rows(result)
                 statistics_data, statistics_kind = result, kind
                 statistics_subjects.controls = rows
+                statistics_types.controls = type_rows
                 statistics_dirty = False
                 statistics_error.value = ""
         except (sqlite3.Error, OSError, ValueError, OverflowError):
@@ -1869,7 +1883,8 @@ async def main(page: ft.Page) -> None:
          ft.Text("A média inclui todos os dias do intervalo escolhido, inclusive descanso e datas futuras. "
                  "O estudo é contado somente até o instante da consulta."),
          statistics_stamp,
-         ft.Text("Tempo por matéria", size=18), statistics_subjects],
+         ft.Text("Tempo por matéria", size=18), statistics_subjects,
+         ft.Text("Tempo por tipo de estudo", size=18), statistics_types],
         expand=True, visible=False, scroll=ft.ScrollMode.AUTO,
         horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
     )

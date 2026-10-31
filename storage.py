@@ -82,12 +82,19 @@ class SubjectStatistics:
 
 
 @dataclass(frozen=True)
+class StudyTypeStatistics:
+    study_type: str
+    total_seconds: float
+
+
+@dataclass(frozen=True)
 class PeriodStatistics:
     start_day: date
     end_day: date
     as_of: datetime
     total_seconds: float
     subjects: tuple[SubjectStatistics, ...] = ()
+    study_types: tuple[StudyTypeStatistics, ...] = ()
 
     @property
     def day_count(self) -> int:
@@ -765,7 +772,7 @@ def read_monthly_calendar(
 def read_period_statistics(
     start_day: date, end_day: date, *, at: datetime | None = None, tz: tzinfo | None = None,
 ) -> PeriodStatistics:
-    """Soma o estudo por matéria no intervalo de datas locais, sem gravar dados."""
+    """Soma o estudo por matéria e tipo no intervalo local, sem gravar dados."""
     if type(start_day) is not date or type(end_day) is not date:
         raise ValueError("Informe datas válidas para consultar as estatísticas.")
     if start_day > end_day:
@@ -774,6 +781,7 @@ def read_period_statistics(
     today = moment.astimezone(tz).date()
     subject_totals: dict[str, timedelta] = {}
     subject_names: dict[str, str] = {}
+    type_totals: dict[str, timedelta] = {}
     with _connection() as connection:
         if start_day <= today:
             # A margem UTC seleciona candidatos sem converter datas antigas
@@ -808,6 +816,9 @@ def read_period_statistics(
                             subject_totals.get(session.subject_id, timedelta()) + duration
                         )
                         subject_names[session.subject_id] = session.subject_name
+                        type_totals[session.study_type] = (
+                            type_totals.get(session.study_type, timedelta()) + duration
+                        )
     # UUIDs mantêm matérias homônimas separadas. A duração só vira float
     # depois das somas e da ordenação, preservando frações de segundo.
     ordered_ids = sorted(subject_totals, key=lambda subject_id: (
@@ -818,8 +829,16 @@ def read_period_statistics(
         SubjectStatistics(subject_id, subject_names[subject_id], subject_totals[subject_id].total_seconds())
         for subject_id in ordered_ids
     )
+    # O texto exato preserva classificações antigas; casefold só desempata.
+    ordered_types = sorted(type_totals, key=lambda study_type: (
+        -type_totals[study_type], study_type.casefold(), study_type,
+    ))
+    study_types = tuple(
+        StudyTypeStatistics(study_type, type_totals[study_type].total_seconds())
+        for study_type in ordered_types
+    )
     total = sum(subject_totals.values(), timedelta())
-    return PeriodStatistics(start_day, end_day, moment, total.total_seconds(), subjects)
+    return PeriodStatistics(start_day, end_day, moment, total.total_seconds(), subjects, study_types)
 
 
 def _read_streak_base(
