@@ -64,7 +64,7 @@ class DateGoalTests(TemporaryDatabaseTest):
         self.assertEqual((plan.default_goal, plan.override, plan.effective_seconds, plan.is_rest_day),
                          (default, None, 3600, False))
         self.assertEqual(self.snapshot(), before)
-        self.assertEqual(self.execute("PRAGMA user_version"), [(7,)])
+        self.assertEqual(self.execute("PRAGMA user_version"), [(storage.SCHEMA_VERSION,)])
 
     def test_specific_past_and_future_dates_override_only_the_selected_day(self):
         first = self.default()
@@ -347,11 +347,12 @@ class DateGoalTests(TemporaryDatabaseTest):
                                        focus_seconds=10, break_seconds=5, at=at(100))
         active = storage.pause_session(active.id, at=at(105))
         self.execute("DROP TABLE daily_goal_overrides")
+        self.execute("DROP TABLE app_settings")
         self.execute("PRAGMA user_version = 6")
         before = self.snapshot(overrides=False)
         storage.initialize_database()
         storage.initialize_database()
-        self.assertEqual(self.execute("PRAGMA user_version"), [(7,)])
+        self.assertEqual(self.execute("PRAGMA user_version"), [(storage.SCHEMA_VERSION,)])
         self.assertEqual(self.execute("SELECT * FROM daily_goal_overrides"), [])
         self.assertEqual(self.snapshot(overrides=False), before)
         self.assertEqual(storage.read_daily_plan(DAY).default_goal, default)
@@ -361,6 +362,7 @@ class DateGoalTests(TemporaryDatabaseTest):
     def test_failed_v6_migration_rolls_back_the_table_and_version_before_retry(self):
         self.default()
         self.execute("DROP TABLE daily_goal_overrides")
+        self.execute("DROP TABLE app_settings")
         self.execute("PRAGMA user_version = 6")
         before = self.snapshot(overrides=False)
         original_connection = storage._connection
@@ -382,7 +384,7 @@ class DateGoalTests(TemporaryDatabaseTest):
         self.assertEqual(self.execute("SELECT name FROM sqlite_master WHERE name = 'daily_goal_overrides'"), [])
         self.assertEqual(self.snapshot(overrides=False), before)
         storage.initialize_database()
-        self.assertEqual(self.execute("PRAGMA user_version"), [(7,)])
+        self.assertEqual(self.execute("PRAGMA user_version"), [(storage.SCHEMA_VERSION,)])
 
     def test_another_process_recovers_overrides_and_preserves_default_and_study_ids(self):
         default = self.default()

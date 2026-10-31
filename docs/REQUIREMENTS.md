@@ -4,6 +4,8 @@
 
 Aplicativo pessoal de estudos para **Windows e Android**, com experiência simples, funcionamento offline, sincronização e backup. Uma única conta pessoal; não haverá cadastro público de outros usuários. Interface responsiva com navegação inferior no celular e lateral no PC. Tema claro, escuro e opção de acompanhar o sistema.
 
+**MVP 0.24.0 — tema:** oferecer Sistema, Claro e Escuro em Configurações, com Sistema como padrão sem registro inicial. Selecionar mantém um rascunho; somente Salvar tema grava e aplica a aparência. Preservar o rascunho ao navegar, e Cancelar tema restaura a preferência carregada sem escrever. Aplicar a escolha persistida ao iniciar ou reabrir o app; Atualizar tema consulta e aplica o valor salvo, preservando uma seleção diferente ainda em edição. Recusar gravação se outra janela alterou a preferência desde a leitura, orientando atualizar antes de tentar novamente. Falhas anteriores à gravação mantêm aparência e rascunho; erro ao aplicar depois do commit informa que a preferência já foi salva. Ler o tema na inicialização, ao abrir Configurações ou por atualização explícita, sem consulta no tick. A preferência é local a cada dispositivo nesta etapa, sem conta, sincronização, dependências novas ou APK.
+
 ## 2. Matérias e classificação
 
 - Criar, renomear e excluir matérias.

@@ -2,7 +2,7 @@
 
 Aplicativo pessoal de acompanhamento de estudos para **Windows e Android**, com registro de tempo, Pomodoro, metas diárias, ofensivas (streaks), calendário e estatísticas. Projeto **offline-first**: os dados são gravados localmente e sincronizados com a nuvem quando houver conexão.
 
-> **Status:** início do MVP offline. A versão 0.22.0 acrescentou barras para comparar o tempo por matéria; os 222 testes de regressão e a integração com controles Flet passaram. A etapa local 0.23.0 estende essa comparação às listas por tipo de estudo e assunto; os 222 testes de regressão e a integração com controles Flet passaram. A conferência na janela do Windows permanece pendente. As provas de conceito anteriores validaram persistência no Windows/Android, cronômetro progressivo no Windows e exibição do aviso de foco concluído no Windows, este confirmado pelo usuário em 28/10/2026. Avisos Android e com o app fechado seguem pendentes, nos marcos combinados.
+> **Status:** início do MVP offline. A versão 0.23.0 acrescentou barras de comparação por tipo de estudo e assunto; os 222 testes de regressão e a integração com controles Flet passaram. A etapa local 0.24.0 acrescenta a preferência de acompanhar o sistema, tema claro ou escuro em Configurações; os 230 testes e a integração com controles Flet passaram. A conferência na janela do Windows permanece pendente. As provas de conceito anteriores validaram persistência no Windows/Android, cronômetro progressivo no Windows e exibição do aviso de foco concluído no Windows, este confirmado pelo usuário em 28/10/2026. Avisos Android e com o app fechado seguem pendentes, nos marcos combinados.
 
 ## Funcionalidades planejadas
 
@@ -286,6 +286,14 @@ Os 222 testes de regressão e a integração com controles Flet passaram, usando
 Em **Estatísticas**, as listas **Tempo por tipo de estudo** e **Tempo por assunto** também recebem barras horizontais. Cada lista usa seu próprio maior tempo como referência, explicado na legenda; as barras não representam uma meta. Os assuntos preservam a matéria, a identificação de nomes iguais e a distinção entre **Sem assunto informado** e um assunto com esse texto literal. Rótulos e durações continuam disponíveis, com barras de largura comum abaixo deles.
 
 As três listas compartilham a mesma função de apresentação e usam os segundos originais, incluindo frações. Filtros, rascunhos, atualização conjunta e preservação dos resultados em falha seguem as regras existentes, sem novas consultas, métricas, dependências, migração ou APK. Os 222 testes de regressão e a integração com controles Flet passaram, usando bancos temporários. Foram verificadas escalas próprias, empates, frações, contexto dos assuntos, filtros e recuperação após falhas. Para conferir na janela do Windows, compare as três listas em Hoje e Mês atual e aplique um período sem estudo; essa conferência permanece pendente.
+
+### Tema do aplicativo — versão 0.24.0
+
+Em **Configurações → Aparência**, escolha **Acompanhar o sistema**, **Claro** ou **Escuro** em **Tema do aplicativo** e use **Salvar tema** para gravar e aplicar a aparência. A seleção sozinha não altera a janela. Acompanhar o sistema usa a preferência do dispositivo e é o padrão antes de qualquer configuração. Ao reabrir o app, a escolha salva é aplicada novamente; ela é local a cada dispositivo, sem sincronização nesta etapa.
+
+Navegar preserva a escolha ainda não salva; **Cancelar tema** restaura a preferência carregada sem gravar. **Atualizar tema** consulta e aplica a preferência persistida, incluindo alterações feitas por outra janela, e preserva uma seleção diferente que esteja em edição. Se outra janela mudar a configuração desde a leitura, salvar recusa sobrescrevê-la e orienta atualizar. Falhas de leitura ou gravação mantêm a aparência e o preenchimento; falha ao aplicar a aparência depois de gravar informa que o tema já foi salvo.
+
+O esquema 8 acrescenta `app_settings`, preservando matérias, estudos, metas e preferências existentes. Não há consulta de tema no tick do cronômetro, dependências novas ou APK. Os 230 testes e a integração com controles Flet passaram, usando bancos temporários. Foram verificados migração, concorrência, rollback, rascunhos, falhas antes/depois da gravação, clique duplicado, leituras tardias, recuperação e reabertura. O banco pessoal não foi usado nos testes. Para conferir na janela do Windows, experimente selecionar sem salvar, cancelar, salvar Claro/Escuro e fechar e reabrir o app; essa conferência permanece pendente.
 
 ## Princípios de desenvolvimento
 

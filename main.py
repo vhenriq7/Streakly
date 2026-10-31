@@ -35,11 +35,13 @@ from storage import (
     read_monthly_calendar,
     read_period_statistics,
     read_study_overview,
+    read_theme_mode,
     read_subject_deletion_preview,
     rename_subject,
     resume_session,
     set_default_daily_goal,
     set_daily_goal_override,
+    set_theme_mode,
     start_next_phase,
     start_session,
     update_finished_session,
@@ -58,6 +60,7 @@ STUDY_TYPES = ("Leitura", "Aula", "Exercícios", "Revisão")
 CUSTOM_STUDY_TYPE_KEY = "custom"
 MONTH_NAMES = ("Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
                "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro")
+THEME_LABELS = {"system": "Acompanhar o sistema", "light": "Claro", "dark": "Escuro"}
 
 
 def resolve_study_type(choice: str | None, custom_name: str | None) -> str:
@@ -153,6 +156,7 @@ def statistics_period(kind: str, today: date, start_text: str = "", end_text: st
 async def main(page: ft.Page) -> None:
     page.title = "Streakly — prova de conceito"
     page.padding = 16
+    page.theme_mode = ft.ThemeMode.SYSTEM
 
     session: StudySession | None = None
     subject_options: list[tuple[str, str]] = []
@@ -187,6 +191,11 @@ async def main(page: ft.Page) -> None:
     statistics_loading = False
     statistics_request: object | None = None
     statistics_fields_initialized = False
+    saved_theme = "system"
+    theme_loaded = False
+    theme_loading = False
+    theme_saving = False
+    theme_request: object | None = None
     history_offset = 0
     history_has_more = False
     history_loaded = False
@@ -226,6 +235,12 @@ async def main(page: ft.Page) -> None:
     goal_settings_status = ft.Text()
     goal_duration = ft.TextField(label="Meta diária padrão (HH:MM)", hint_text="Ex.: 03:00")
     goal_message = ft.Text()
+    theme_choice = ft.Dropdown(
+        label="Tema do aplicativo", value="system",
+        options=[ft.DropdownOption(key=key, text=label) for key, label in THEME_LABELS.items()],
+    )
+    theme_status = ft.Text("Carregando tema…")
+    theme_message = ft.Text()
     streak_current = ft.Text("Ofensiva indisponível.", size=18, weight=ft.FontWeight.BOLD)
     streak_record = ft.Text("Recorde indisponível.")
     streak_hint = ft.Text()
@@ -524,6 +539,15 @@ async def main(page: ft.Page) -> None:
     def render() -> None:
         active = session is not None
         locked = busy or not ready
+        theme_locked = locked or theme_loading or theme_saving or delete_dialog is not None
+        theme_choice.disabled = theme_locked or not theme_loaded
+        theme_save_button.disabled = theme_cancel_button.disabled = (
+            theme_locked or not theme_loaded or theme_choice.value == saved_theme
+        )
+        theme_refresh_button.disabled = theme_locked
+        theme_status.value = ("Carregando tema…" if theme_loading else
+                              f"Preferência salva: {THEME_LABELS[saved_theme]}." if theme_loaded else
+                              "Tema indisponível. Use Atualizar tema.")
         if session:
             subject_choice.value = session.subject_id
             study_type.value = f"type:{session.study_type}"
@@ -1196,6 +1220,83 @@ async def main(page: ft.Page) -> None:
                 busy = date_saving = False
                 render()
 
+    async def read_theme_preference() -> None:
+        nonlocal saved_theme, theme_loaded, theme_loading, theme_request
+        request = object()
+        theme_request = request
+        preserve_draft = theme_loaded and theme_choice.value != saved_theme
+        theme_loading = True
+        render()
+        try:
+            result = await asyncio.to_thread(read_theme_mode)
+            if theme_request is request and connected:
+                page.theme_mode = ft.ThemeMode(result)
+                saved_theme, theme_loaded = result, True
+                if not preserve_draft:
+                    theme_choice.value = result
+                theme_message.value = ""
+        except (sqlite3.Error, OSError, ValueError):
+            if theme_request is request:
+                theme_message.value = "Não foi possível consultar ou aplicar o tema. A aparência e o preenchimento anteriores foram mantidos."
+        finally:
+            if theme_request is request:
+                theme_request = None
+            theme_loading = False
+            render()
+
+    async def refresh_theme(event=None) -> None:
+        nonlocal busy
+        if busy or not ready or theme_loading or theme_saving or delete_dialog is not None or not connected:
+            return
+        busy = True
+        render()
+        async with state_lock:
+            try:
+                await read_theme_preference()
+            finally:
+                busy = False
+                render()
+
+    async def open_settings(event) -> None:
+        await show_settings(event)
+
+    def cancel_theme(event) -> None:
+        if busy or not theme_loaded or theme_saving or delete_dialog is not None:
+            return
+        theme_choice.value = saved_theme
+        theme_message.value = ""
+        render()
+
+    async def save_theme(event) -> None:
+        nonlocal busy, theme_saving, saved_theme, theme_loaded
+        if busy or not ready or not theme_loaded or theme_saving or delete_dialog is not None or not connected:
+            return
+        selected = theme_choice.value
+        if selected not in THEME_LABELS:
+            theme_message.value = "Escolha um tema válido."
+            render()
+            return
+        busy = theme_saving = True
+        saved = False
+        render()
+        async with state_lock:
+            try:
+                result = await asyncio.to_thread(set_theme_mode, selected, saved_theme)
+                saved = True
+                saved_theme, theme_loaded = result, True
+                theme_choice.value = result
+                page.theme_mode = ft.ThemeMode(result)
+                theme_message.value = "Tema salvo neste dispositivo."
+            except ValueError as error:
+                theme_message.value = ("Tema salvo, mas a aparência não pôde ser atualizada. Use Atualizar tema."
+                                       if saved else str(error))
+            except (sqlite3.Error, OSError):
+                theme_message.value = ("Tema salvo, mas a aparência não pôde ser atualizada. Use Atualizar tema."
+                                       if saved else "Não foi possível salvar o tema. A aparência e o preenchimento foram mantidos.")
+            finally:
+                busy = theme_saving = False
+                render()
+
     def open_goal_editor(event=None) -> None:
         nonlocal goal_editing, goal_expected, goal_edit_day, goal_original_text
         if busy or not ready or goal_saving or goal_editing or delete_dialog is not None:
@@ -1817,10 +1918,13 @@ async def main(page: ft.Page) -> None:
     manual_open_button = ft.TextButton("Adicionar sessão", on_click=open_manual)
     manual_save_button = ft.Button("Salvar registro manual", on_click=save_manual)
     manual_cancel_button = ft.TextButton("Cancelar", on_click=cancel_manual)
-    goal_settings_button = ft.TextButton("Configurar meta diária", on_click=lambda event: show_settings(event))
+    goal_settings_button = ft.TextButton("Configurar meta diária", on_click=open_settings)
     goal_edit_button = ft.Button("Editar meta diária", on_click=open_goal_editor)
     goal_save_button = ft.Button("Salvar meta diária", on_click=save_goal)
     goal_cancel_button = ft.TextButton("Cancelar meta", on_click=cancel_goal_editor)
+    theme_save_button = ft.Button("Salvar tema", on_click=save_theme)
+    theme_cancel_button = ft.TextButton("Cancelar tema", on_click=cancel_theme)
+    theme_refresh_button = ft.TextButton("Atualizar tema", on_click=refresh_theme)
     streak_refresh_button = ft.TextButton("Atualizar ofensiva", on_click=refresh_streak_summary)
     plan_query_button = ft.Button("Consultar data", on_click=query_date_plan)
     plan_edit_button = ft.TextButton("Editar planejamento", on_click=fill_date_editor)
@@ -1839,6 +1943,7 @@ async def main(page: ft.Page) -> None:
     study_type.on_select = manual_study_type.on_select = choose_mode_or_preset
     plan_mode.on_select = plan_date.on_change = choose_mode_or_preset
     statistics_choice.on_select = choose_mode_or_preset
+    theme_choice.on_select = choose_mode_or_preset
     for field in custom_fields:
         field.on_change = choose_mode_or_preset
 
@@ -1903,7 +2008,10 @@ async def main(page: ft.Page) -> None:
     )
     settings_panel = ft.Column(
         [ft.Text("Configurações", size=20), ft.Text("Meta diária padrão", size=18),
-         goal_settings_status, goal_edit_button, goal_form],
+         goal_settings_status, goal_edit_button, goal_form,
+         ft.Text("Aparência", size=18), theme_status, theme_choice,
+         ft.Text("A escolha será aplicada ao salvar. Acompanhar o sistema usa a preferência do dispositivo."),
+         ft.Row([theme_save_button, theme_cancel_button, theme_refresh_button], wrap=True), theme_message],
         expand=True, visible=False, scroll=ft.ScrollMode.AUTO,
         horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
     )
@@ -1973,13 +2081,14 @@ async def main(page: ft.Page) -> None:
         else:
             await load_history()
 
-    def show_settings(event) -> None:
+    async def show_settings(event) -> None:
         statistics_panel.visible = False
         calendar_panel.visible = False
         home_panel.visible = subjects_panel.visible = timer_panel.visible = history_panel.visible = False
         settings_panel.visible = True
         open_goal_editor()
-        page.update()
+        await refresh_theme(event)
+        render()
 
     async def show_calendar(event) -> None:
         statistics_panel.visible = False
@@ -2031,6 +2140,7 @@ async def main(page: ft.Page) -> None:
     render()
     try:
         await asyncio.to_thread(initialize_database)
+        await read_theme_preference()
         await refresh_state(reload_study_types=True, reload_streak=True)
     except ValueError as error:
         message.value = str(error)
@@ -2077,11 +2187,13 @@ async def main(page: ft.Page) -> None:
 
     def stop_updates(event=None) -> None:
         nonlocal connected, delete_dialog, subject_delete_request, date_request, month_request, statistics_request
+        nonlocal theme_request
         connected = False
         subject_delete_request = None
         date_request = None
         month_request = None
         statistics_request = None
+        theme_request = None
         if delete_dialog:
             delete_dialog.open = False
             delete_dialog = None

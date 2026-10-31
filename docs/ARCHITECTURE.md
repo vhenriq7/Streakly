@@ -191,6 +191,10 @@ As barras são montadas com as linhas apenas quando chega uma nova consulta vál
 
 A montagem continua anterior à substituição conjunta das três listas e dos indicadores, apenas após consulta válida. Modelos, consultas, métricas, cache, tratamento de falhas e tick permanecem iguais; não há migração, dependência ou APK, e o esquema continua na versão 7.
 
+**Tema do aplicativo 0.24.0:** a migração aditiva e transacional do esquema 7 para 8 acrescenta `app_settings(key, value)`, preservando matérias, estudos, eventos, metas e preferências existentes. `read_theme_mode` retorna `system`, `light` ou `dark`, usando `system` quando não existe configuração, sem criar registro na leitura. `set_theme_mode(mode, expected)` valida o modo e compara a preferência esperada com a atual sob `BEGIN IMMEDIATE` antes de gravar, recusando conflito com outra janela. A função retorna o modo salvo; a preferência é local ao dispositivo e não participa de sincronização nesta etapa.
+
+`main.py` mantém separadas a preferência carregada e a seleção em edição em Configurações. A escolha é convertida para `ft.ThemeMode` e aplicada a `page.theme_mode` somente depois de salvar; selecionar não antecipa a aparência, cancelar não escreve e navegar preserva o rascunho. A inicialização, a abertura de Configurações e Atualizar tema consultam a preferência persistida, sem consultas no tick do cronômetro. Atualizar aplica o valor persistido e preserva uma escolha diferente em edição. Falhas de leitura ou escrita preservam aparência e preenchimento; se a aplicação da aparência falhar após o commit, a mensagem informa que o tema já foi salvo. Não há dependências novas ou APK.
+
 ## 6. Protocolo de sincronização
 
 1. Salvar alteração **em transação local**, junto com item na outbox.
@@ -261,6 +265,8 @@ O Android reutiliza `main.py`, `storage.py`, `timer.py` e `notifications.py`, co
 **Comparação visual por matéria 0.22.0:** os 222 testes de regressão passaram. A integração com controles Flet e banco temporário verificou proporções, empates, frações, homônimas, períodos vazios, filtros, descrições acessíveis, ausência de consulta ou reconstrução no tick, atualização após correções, preservação conjunta em falhas de leitura e após commit, recuperação, respostas tardias e reabertura. Falta conferir as barras e a navegação na janela nativa do Windows. Não houve novas consultas, migração, dependências ou APK; os testes não usaram o banco pessoal.
 
 **Comparação por tipo e assunto 0.23.0:** os 222 testes de regressão passaram. A integração com controles Flet e bancos temporários verificou as escalas independentes, proporções, empates, frações, largura comum, descrições acessíveis, contexto dos assuntos e ausência de preenchimento, filtros, períodos vazios, rascunhos, ausência de consulta ou reconstrução no tick, correções durante navegação, preservação dos eventos, falhas de leitura e após commit, recuperação, respostas tardias e reabertura. Falta conferir as três listas na janela nativa do Windows. Não houve alterações do banco pessoal, consultas adicionais, migração, novas dependências ou APK.
+
+**Tema do aplicativo 0.24.0:** os 230 testes passaram, incluindo migração 7→8 preservando os dados, padrão Sistema sem gravação inicial, validação, concorrência, rollback e recuperação em outro processo. A integração com controles Flet e SQLite temporário verificou salvar/cancelar, rascunhos entre telas, conflito entre janelas, atualização explícita, falhas antes/depois do commit, clique duplicado, leituras tardias, recuperação após falha na abertura, ausência de consulta de tema no tick e reabertura. Falta conferir as três opções e sua persistência na janela nativa do Windows. Não houve dependências novas ou APK; o banco pessoal não foi usado nos testes.
 
 Antes do MVP completo:
 

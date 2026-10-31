@@ -100,7 +100,7 @@ class PeriodStatisticsTests(TemporaryDatabaseTest):
         self.assertEqual((single.day_count, single.total_seconds, single.average_seconds), (1, 120, 120))
         self.assertEqual(self.rows(single), [(self.subjects["SQL"], "SQL", 120)])
         self.assertEqual(empty.total_seconds, 0)
-        self.assertEqual(self.execute("PRAGMA user_version"), [(7,)])
+        self.assertEqual(self.execute("PRAGMA user_version"), [(storage.SCHEMA_VERSION,)])
         self.assertEqual(self.execute("PRAGMA foreign_key_check"), [])
 
     def test_overnight_study_crosses_month_and_year_using_the_requested_local_days(self):

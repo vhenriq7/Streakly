@@ -361,10 +361,11 @@ with patch.object(storage, 'database_path', return_value=Path(sys.argv[1])):
         self.execute("ALTER TABLE sessions DROP COLUMN source")
         self.execute("DROP TABLE daily_goal_overrides")
         self.execute("DROP TABLE daily_goal_defaults")
+        self.execute("DROP TABLE app_settings")
         self.execute("PRAGMA user_version = 2")
         storage.initialize_database()
         storage.initialize_database()
-        self.assertEqual(self.execute("PRAGMA user_version"), [(7,)])
+        self.assertEqual(self.execute("PRAGMA user_version"), [(storage.SCHEMA_VERSION,)])
         for table, rows in before.items():
             self.assertEqual(self.execute(f"SELECT * FROM {table} ORDER BY id"), rows)
         self.assertEqual(storage.get_session(finished.id), finished)
@@ -429,10 +430,11 @@ with patch.object(storage, 'database_path', return_value=Path(sys.argv[1])):
         self.execute("ALTER TABLE sessions DROP COLUMN source")
         self.execute("DROP TABLE daily_goal_overrides")
         self.execute("DROP TABLE daily_goal_defaults")
+        self.execute("DROP TABLE app_settings")
         self.execute("PRAGMA user_version = 3")
         storage.initialize_database()
         storage.initialize_database()
-        self.assertEqual(self.execute("PRAGMA user_version"), [(7,)])
+        self.assertEqual(self.execute("PRAGMA user_version"), [(storage.SCHEMA_VERSION,)])
         for table, rows in before.items():
             self.assertEqual(self.execute(f"SELECT * FROM {table} ORDER BY id"), rows)
         for table, (columns, _) in legacy_tables.items():

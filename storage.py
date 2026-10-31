@@ -17,7 +17,7 @@ from timer import (
 )
 
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 NAMED_PRESETS = {
     "25/5": (1500, 300, 900, 4),
@@ -338,6 +338,58 @@ def initialize_database() -> None:
                 """
             )
             connection.execute("PRAGMA user_version = 7")
+            version = 7
+
+        if version == 7:
+            connection.execute(
+                """
+                CREATE TABLE app_settings (
+                    key TEXT PRIMARY KEY NOT NULL CHECK (length(key) > 0),
+                    value TEXT NOT NULL,
+                    CHECK (key != 'theme_mode' OR value IN ('system', 'light', 'dark'))
+                )
+                """
+            )
+            connection.execute("PRAGMA user_version = 8")
+
+
+def _read_theme_mode(connection: sqlite3.Connection) -> str:
+    row = connection.execute(
+        "SELECT value FROM app_settings WHERE key = ?", ("theme_mode",),
+    ).fetchone()
+    if row is None:
+        return "system"
+    mode = row["value"]
+    if not isinstance(mode, str) or mode not in ("system", "light", "dark"):
+        raise ValueError("A configuração de tema salva é inválida.")
+    return mode
+
+
+def read_theme_mode() -> str:
+    """Consulta o tema local; a ausência de preferência acompanha o sistema."""
+    with _connection() as connection:
+        return _read_theme_mode(connection)
+
+
+def set_theme_mode(mode: str, expected: str) -> str:
+    """Salva o tema sem sobrescrever uma preferência alterada desde a leitura."""
+    if not isinstance(mode, str) or mode not in ("system", "light", "dark"):
+        raise ValueError("Escolha um tema válido: sistema, claro ou escuro.")
+    if not isinstance(expected, str) or expected not in ("system", "light", "dark"):
+        raise ValueError("Atualize a configuração antes de salvar o tema.")
+    with _connection(write=True) as connection:
+        current = _read_theme_mode(connection)
+        if current != expected:
+            raise ValueError("O tema mudou desde a leitura. Atualize a configuração antes de salvar.")
+        if current != mode:
+            connection.execute(
+                """
+                INSERT INTO app_settings (key, value) VALUES (?, ?)
+                ON CONFLICT (key) DO UPDATE SET value = excluded.value
+                """,
+                ("theme_mode", mode),
+            )
+        return mode
 
 
 def _read_default_daily_goal(connection: sqlite3.Connection, day: date) -> DefaultDailyGoal | None:

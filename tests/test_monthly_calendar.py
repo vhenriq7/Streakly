@@ -65,7 +65,7 @@ class MonthlyCalendarTests(TemporaryDatabaseTest):
                 self.assertEqual(tuple(item.plan.day for item in result.days), expected)
                 self.assertTrue(all(item.study_seconds == 0 and item.plan.effective_seconds is None
                                     for item in result.days))
-        self.assertEqual(self.execute("PRAGMA user_version"), [(7,)])
+        self.assertEqual(self.execute("PRAGMA user_version"), [(storage.SCHEMA_VERSION,)])
         self.assertEqual(self.execute("PRAGMA foreign_key_check"), [])
 
     def test_invalid_year_month_and_naive_moment_are_rejected_before_connection(self):

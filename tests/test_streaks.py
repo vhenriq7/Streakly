@@ -158,7 +158,7 @@ class StreakStorageTests(TemporaryDatabaseTest):
         self.override(21, rest=True)
         self.override(31, 60)
         self.assert_base(30, 0, 0)
-        self.assertEqual(self.execute("PRAGMA user_version"), [(7,)])
+        self.assertEqual(self.execute("PRAGMA user_version"), [(storage.SCHEMA_VERSION,)])
         self.assertEqual(self.execute("PRAGMA foreign_key_check"), [])
 
     def test_a_closed_missed_day_breaks_the_current_streak_but_keeps_the_record(self):
