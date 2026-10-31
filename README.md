@@ -2,7 +2,7 @@
 
 Aplicativo pessoal de acompanhamento de estudos para **Windows e Android**, com registro de tempo, Pomodoro, metas diárias, ofensivas (streaks), calendário e estatísticas. Projeto **offline-first**: os dados são gravados localmente e sincronizados com a nuvem quando houver conexão.
 
-> **Status:** início do MVP offline. A versão 0.17.0 acrescenta a grade mensal do Calendário, com tempo estudado, metas e descanso por dia. Os 186 testes automatizados e a integração com controles Flet passaram; falta conferir a grade na janela do Windows. As provas de conceito anteriores validaram persistência no Windows/Android, cronômetro progressivo no Windows e exibição do aviso de foco concluído no Windows, este confirmado pelo usuário em 28/10/2026. Avisos Android e com o app fechado seguem pendentes, nos marcos combinados.
+> **Status:** início do MVP offline. A versão 0.17.0 acrescentou a grade mensal do Calendário e passou nos 186 testes automatizados. A etapa local 0.18.0 inicia Estatísticas com total e média diária por período; os 198 testes e a integração com controles Flet passaram. Falta a conferência na janela do Windows. As provas de conceito anteriores validaram persistência no Windows/Android, cronômetro progressivo no Windows e exibição do aviso de foco concluído no Windows, este confirmado pelo usuário em 28/10/2026. Avisos Android e com o app fechado seguem pendentes, nos marcos combinados.
 
 ## Funcionalidades planejadas
 
@@ -238,6 +238,16 @@ Em **Calendário**, a grade de segunda a domingo mostra o tempo estudado e a sit
 A primeira abertura carrega o mês sem abrir o editor. Clicar em um dia consulta seu planejamento, sem gravar. Navegar entre meses preserva o formulário e a data em edição; clicar novamente no mesmo dia mantém o rascunho. Para selecionar outro dia enquanto edita, use primeiro **Cancelar planejamento**. A consulta digitada por data continua disponível.
 
 A grade representa a consulta mensal mais recente. Ela é carregada ao abrir, navegar ou atualizar o mês, e gravações atualizam o mês visível. Use Atualizar mês ou reabra Calendário para incorporar tempo recente e alterações de outra instância. Falhas mantêm a grade e o mês anteriores com aviso. Os 186 testes automatizados e a integração com controles Flet passaram, usando bancos temporários, incluindo navegação, rascunhos, falhas de leitura e gravação de meta em data limite. Para conferir no Windows, navegue entre meses, selecione um dia e confirme que cancelar preserva seus dados. Falta essa conferência na janela nativa. O esquema permanece na versão 7, sem dependências novas ou APK; as estatísticas completas ficam para depois.
+
+### Estatísticas por período — versão 0.18.0
+
+Em **Estatísticas**, consulte o tempo total e a média diária com os filtros **Hoje**, **Semana atual** (segunda-feira até hoje), **Mês atual** (dia 1 até hoje), **Ano atual** (1º de janeiro até hoje) e **Personalizado**. Neste último, informe início e fim em **DD/MM/AAAA**; as duas datas entram no período e o início não pode ser posterior ao fim.
+
+A média divide o tempo pelo número de dias do intervalo, incluindo dias sem estudo, descanso e ausência de meta. Um intervalo personalizado pode conter datas futuras: esses dias entram no divisor com estudo zero, e o tempo contabilizado termina no instante da consulta. Por exemplo, três horas em um intervalo de três dias resultam em uma hora diária, mesmo que todo o estudo tenha ocorrido em um único dia. O cálculo usa os dias do fuso local, exclui pausas e espera e respeita o prazo do foco Pomodoro.
+
+Os indicadores mostram a consulta mais recente e seu período aplicado. **Aplicar período** consulta os filtros preenchidos; **Atualizar estatísticas** e reabrir a tela recarregam o período aplicado, preservando o rascunho. Gravações relevantes atualizam os resultados quando a tela está visível; não há consulta de estatísticas a cada segundo. Navegar preserva o preenchimento personalizado, inclusive parcial. Falhas mantêm o período e os resultados anteriores com aviso.
+
+Os 198 testes automatizados e a integração com controles Flet passaram, usando bancos temporários. Falta a conferência na janela nativa do Windows. Para conferir, abra Estatísticas, compare Hoje com Mês atual e aplique um intervalo personalizado que inclua um dia sem estudo. A consulta não altera o banco; o esquema continua na versão 7, sem dependências novas ou APK. Divisões por matéria, tipo e assunto, além dos gráficos, ficam para as próximas etapas.
 
 ## Princípios de desenvolvimento
 

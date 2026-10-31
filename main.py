@@ -18,6 +18,7 @@ from storage import (
     DailyPlan,
     DefaultDailyGoal,
     MonthlyCalendar,
+    PeriodStatistics,
     StreakBase,
     add_subject,
     create_manual_session,
@@ -32,6 +33,7 @@ from storage import (
     read_session_history,
     read_daily_plan,
     read_monthly_calendar,
+    read_period_statistics,
     read_study_overview,
     read_subject_deletion_preview,
     rename_subject,
@@ -130,6 +132,24 @@ def parse_plan_date(text: str) -> date:
         raise ValueError("Informe a data como DD/MM/AAAA.") from None
 
 
+def statistics_period(kind: str, today: date, start_text: str = "", end_text: str = "") -> tuple[date, date]:
+    """Resolve o filtro sem transformar datas locais em horários."""
+    if kind == "today":
+        return today, today
+    if kind == "week":
+        return today - timedelta(days=today.weekday()), today
+    if kind == "month":
+        return today.replace(day=1), today
+    if kind == "year":
+        return today.replace(month=1, day=1), today
+    if kind == "custom":
+        start, end = parse_plan_date(start_text), parse_plan_date(end_text)
+        if end < start:
+            raise ValueError("A data final precisa ser igual ou posterior à inicial.")
+        return start, end
+    raise ValueError("Escolha um período para consultar as estatísticas.")
+
+
 async def main(page: ft.Page) -> None:
     page.title = "Streakly — prova de conceito"
     page.padding = 16
@@ -161,6 +181,12 @@ async def main(page: ft.Page) -> None:
     month_dirty = True
     month_loading = False
     month_request: object | None = None
+    statistics_data: PeriodStatistics | None = None
+    statistics_kind = "month"
+    statistics_dirty = True
+    statistics_loading = False
+    statistics_request: object | None = None
+    statistics_fields_initialized = False
     history_offset = 0
     history_has_more = False
     history_loaded = False
@@ -217,6 +243,23 @@ async def main(page: ft.Page) -> None:
     month_status = ft.Text("O mês ainda não foi consultado.")
     month_error = ft.Text()
     month_grid = ft.Column(spacing=4)
+    statistics_choice = ft.Dropdown(
+        label="Período das estatísticas", value="month",
+        options=[ft.DropdownOption(key=key, text=label) for key, label in (
+            ("today", "Hoje"), ("week", "Semana atual (segunda até hoje)"),
+            ("month", "Mês atual (até hoje)"), ("year", "Ano atual (até hoje)"),
+            ("custom", "Personalizado"),
+        )],
+    )
+    statistics_start = ft.TextField(label="Data inicial (DD/MM/AAAA)", width=260)
+    statistics_end = ft.TextField(label="Data final (DD/MM/AAAA)", width=260)
+    statistics_status = ft.Text("As estatísticas ainda não foram consultadas.")
+    statistics_error = ft.Text()
+    statistics_range = ft.Text()
+    statistics_total = ft.Text("—", size=32)
+    statistics_average = ft.Text("—", size=32)
+    statistics_days = ft.Text()
+    statistics_stamp = ft.Text(size=12)
     home_session = ft.Text()
     home_subjects = ft.ListView(
         controls=[ft.Text("Nenhuma matéria cadastrada ainda.")],
@@ -378,7 +421,7 @@ async def main(page: ft.Page) -> None:
         nonlocal session, subject_options, settings_subject, ready, today, today_seconds
         nonlocal subject_selection_removed, recorded_study_types, daily_goal, today_override
         nonlocal streak_base, streak_zone_key
-        nonlocal month_dirty
+        nonlocal month_dirty, statistics_dirty
         previous = session
         moment = datetime.now(UTC)
         local_moment = moment.astimezone()
@@ -386,6 +429,7 @@ async def main(page: ft.Page) -> None:
         zone_changed = streak_zone_key is not None and streak_zone_key != zone_key
         if zone_changed:
             month_dirty = True
+            statistics_dirty = True
         need_streak = reload_streak or streak_base is None or streak_zone_key != zone_key
         if need_streak:
             streak_base = None
@@ -461,6 +505,8 @@ async def main(page: ft.Page) -> None:
         if calendar_panel.visible and month_dirty and (reload_streak or zone_changed):
             await read_month_view(month_data.year if month_data else today.year,
                                   month_data.month if month_data else today.month)
+        if statistics_panel.visible and statistics_dirty and (reload_streak or zone_changed):
+            await read_statistics_view(statistics_kind, *applied_statistics_period())
 
     def render() -> None:
         active = session is not None
@@ -593,6 +639,25 @@ async def main(page: ft.Page) -> None:
             for cell in row.controls:
                 if isinstance(cell, ft.Button):
                     cell.disabled = month_locked
+        statistics_locked = locked or statistics_loading or delete_dialog is not None
+        statistics_choice.disabled = statistics_start.disabled = statistics_end.disabled = statistics_locked
+        statistics_apply_button.disabled = statistics_refresh_button.disabled = statistics_locked
+        statistics_custom_row.visible = statistics_choice.value == "custom"
+        if statistics_loading:
+            statistics_status.value = "Carregando estatísticas…"
+        elif statistics_data is None:
+            statistics_status.value = "As estatísticas ainda não foram consultadas. Use Aplicar período."
+        elif statistics_dirty:
+            statistics_status.value = "Os resultados precisam de atualização. Use Atualizar estatísticas."
+        else:
+            statistics_status.value = "Resultados da última consulta. Use Aplicar período para consultar os filtros preenchidos."
+        if statistics_data is not None:
+            result = statistics_data
+            statistics_range.value = f"Período aplicado: {result.start_day:%d/%m/%Y} a {result.end_day:%d/%m/%Y}"
+            statistics_total.value = format_duration(result.total_seconds)
+            statistics_average.value = format_duration(result.average_seconds)
+            statistics_days.value = f"Média dividida por {result.day_count} {'dia' if result.day_count == 1 else 'dias'}, incluindo dias sem estudo."
+            statistics_stamp.value = f"Consultado em {result.as_of.astimezone():%d/%m/%Y às %H:%M:%S}."
         history_locked = locked or history_loading or delete_dialog is not None
         timing_editable = editing_session is None or editing_session.source == "manual"
         history_nav_button.disabled = history_loading or manual_saving or delete_dialog is not None
@@ -704,10 +769,66 @@ async def main(page: ft.Page) -> None:
             page.update()
 
     def invalidate_streak_cache() -> None:
-        nonlocal streak_base, streak_zone_key, month_dirty
+        nonlocal streak_base, streak_zone_key, month_dirty, statistics_dirty
         streak_base = None
         streak_zone_key = None
         month_dirty = True
+        statistics_dirty = True
+
+    def applied_statistics_period() -> tuple[date, date]:
+        if statistics_kind == "custom" and statistics_data is not None:
+            return statistics_data.start_day, statistics_data.end_day
+        return statistics_period(statistics_kind, datetime.now(UTC).astimezone().date())
+
+    async def read_statistics_view(kind: str, start: date, end: date) -> None:
+        nonlocal statistics_request, statistics_loading, statistics_data, statistics_kind, statistics_dirty
+        request = object()
+        statistics_request = request
+        statistics_loading = True
+        render()
+        try:
+            result = await asyncio.to_thread(read_period_statistics, start, end, at=datetime.now(UTC))
+            if statistics_request is request and connected:
+                statistics_data, statistics_kind = result, kind
+                statistics_dirty = False
+                statistics_error.value = ""
+        except (sqlite3.Error, OSError, ValueError, OverflowError):
+            if statistics_request is request:
+                statistics_error.value = "Não foi possível consultar as estatísticas. Os resultados anteriores foram mantidos."
+        finally:
+            if statistics_request is request:
+                statistics_request = None
+            statistics_loading = False
+            render()
+
+    async def load_statistics(kind: str, start: date, end: date) -> None:
+        nonlocal busy
+        if busy or not ready or statistics_loading or delete_dialog is not None:
+            return
+        busy = True
+        render()
+        async with state_lock:
+            try:
+                await read_statistics_view(kind, start, end)
+            finally:
+                busy = False
+                render()
+
+    async def apply_statistics(event) -> None:
+        if busy or not ready or delete_dialog is not None:
+            return
+        try:
+            kind = statistics_choice.value
+            start, end = statistics_period(kind, datetime.now(UTC).astimezone().date(),
+                                           statistics_start.value or "", statistics_end.value or "")
+        except ValueError as error:
+            statistics_error.value = str(error)
+            render()
+            return
+        await load_statistics(kind, start, end)
+
+    async def refresh_statistics(event=None) -> None:
+        await load_statistics(statistics_kind, *applied_statistics_period())
 
     def month_day_button(item: CalendarDay, displayed: MonthlyCalendar) -> ft.Button:
         target = item.plan.effective_seconds
@@ -1609,12 +1730,15 @@ async def main(page: ft.Page) -> None:
     month_next_button = ft.TextButton("Próximo mês", on_click=next_month)
     month_current_button = ft.TextButton("Mês atual", on_click=current_month)
     month_refresh_button = ft.TextButton("Atualizar mês", on_click=refresh_month)
+    statistics_apply_button = ft.Button("Aplicar período", on_click=apply_statistics)
+    statistics_refresh_button = ft.TextButton("Atualizar estatísticas", on_click=refresh_statistics)
     for field in (manual_date, manual_time, manual_duration):
         field.on_change = preview_manual_end
     subject_choice.on_select = choose_subject
     mode_choice.on_select = preset_choice.on_select = choose_mode_or_preset
     study_type.on_select = manual_study_type.on_select = choose_mode_or_preset
     plan_mode.on_select = plan_date.on_change = choose_mode_or_preset
+    statistics_choice.on_select = choose_mode_or_preset
     for field in custom_fields:
         field.on_change = choose_mode_or_preset
 
@@ -1702,24 +1826,41 @@ async def main(page: ft.Page) -> None:
         expand=True, visible=False, scroll=ft.ScrollMode.AUTO,
         horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
     )
+    statistics_custom_row = ft.Row([statistics_start, statistics_end], wrap=True, visible=False)
+    statistics_panel = ft.Column(
+        [ft.Text("Estatísticas", size=20), statistics_choice, statistics_custom_row,
+         ft.Row([statistics_apply_button, statistics_refresh_button], wrap=True),
+         statistics_status, statistics_error, statistics_range,
+         ft.Text("Tempo total estudado", size=18), statistics_total,
+         ft.Text("Média diária", size=18), statistics_average, statistics_days,
+         ft.Text("A média inclui todos os dias do intervalo escolhido, inclusive descanso e datas futuras. "
+                 "O estudo é contado somente até o instante da consulta."),
+         statistics_stamp],
+        expand=True, visible=False, scroll=ft.ScrollMode.AUTO,
+        horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+    )
 
     def show_subjects(event) -> None:
+        statistics_panel.visible = False
         history_panel.visible = settings_panel.visible = calendar_panel.visible = False
         home_panel.visible, subjects_panel.visible, timer_panel.visible = False, True, False
         page.update()
 
     def show_timer(event) -> None:
+        statistics_panel.visible = False
         history_panel.visible = settings_panel.visible = calendar_panel.visible = False
         home_panel.visible, subjects_panel.visible, timer_panel.visible = False, False, True
         page.update()
 
     async def show_home(event) -> None:
+        statistics_panel.visible = False
         history_panel.visible = settings_panel.visible = calendar_panel.visible = False
         home_panel.visible, subjects_panel.visible, timer_panel.visible = True, False, False
         await refresh_streak_summary(event)
         render()
 
     async def show_history(event) -> None:
+        statistics_panel.visible = False
         settings_panel.visible = calendar_panel.visible = False
         home_panel.visible = subjects_panel.visible = timer_panel.visible = False
         history_panel.visible = True
@@ -1729,6 +1870,7 @@ async def main(page: ft.Page) -> None:
             await load_history()
 
     def show_settings(event) -> None:
+        statistics_panel.visible = False
         calendar_panel.visible = False
         home_panel.visible = subjects_panel.visible = timer_panel.visible = history_panel.visible = False
         settings_panel.visible = True
@@ -1736,12 +1878,25 @@ async def main(page: ft.Page) -> None:
         page.update()
 
     async def show_calendar(event) -> None:
+        statistics_panel.visible = False
         home_panel.visible = subjects_panel.visible = timer_panel.visible = False
         history_panel.visible = settings_panel.visible = False
         calendar_panel.visible = True
         if not plan_date.value and today:
             plan_date.value = today.strftime("%d/%m/%Y")
         await refresh_month(event)
+        render()
+
+    async def show_statistics(event) -> None:
+        nonlocal statistics_fields_initialized
+        home_panel.visible = subjects_panel.visible = timer_panel.visible = False
+        history_panel.visible = settings_panel.visible = calendar_panel.visible = False
+        statistics_panel.visible = True
+        if not statistics_fields_initialized and today:
+            statistics_start.value = today.replace(day=1).strftime("%d/%m/%Y")
+            statistics_end.value = today.strftime("%d/%m/%Y")
+            statistics_fields_initialized = True
+        await refresh_statistics(event)
         render()
 
     history_nav_button = ft.TextButton("Histórico", on_click=show_history)
@@ -1757,8 +1912,10 @@ async def main(page: ft.Page) -> None:
                     history_nav_button,
                     ft.TextButton("Configurações", on_click=show_settings),
                     ft.TextButton("Calendário", on_click=show_calendar),
+                    ft.TextButton("Estatísticas", on_click=show_statistics),
                 ], wrap=True),
                 message, home_panel, subjects_panel, timer_panel, history_panel, settings_panel, calendar_panel,
+                statistics_panel,
             ],
             expand=True, horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
         ),
@@ -1815,11 +1972,12 @@ async def main(page: ft.Page) -> None:
             ticker = page.run_task(update_timer)
 
     def stop_updates(event=None) -> None:
-        nonlocal connected, delete_dialog, subject_delete_request, date_request, month_request
+        nonlocal connected, delete_dialog, subject_delete_request, date_request, month_request, statistics_request
         connected = False
         subject_delete_request = None
         date_request = None
         month_request = None
+        statistics_request = None
         if delete_dialog:
             delete_dialog.open = False
             delete_dialog = None

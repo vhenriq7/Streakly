@@ -75,6 +75,22 @@ class MonthlyCalendar:
 
 
 @dataclass(frozen=True)
+class PeriodStatistics:
+    start_day: date
+    end_day: date
+    as_of: datetime
+    total_seconds: float
+
+    @property
+    def day_count(self) -> int:
+        return (self.end_day - self.start_day).days + 1
+
+    @property
+    def average_seconds(self) -> float:
+        return self.total_seconds / self.day_count
+
+
+@dataclass(frozen=True)
 class StreakBase:
     day: date
     current_before_today: int
@@ -736,6 +752,48 @@ def read_monthly_calendar(
                 plan=DailyPlan(day, current_default, by_day.get(day)),
             ))
         return MonthlyCalendar(year, month, today, tuple(days))
+
+
+def read_period_statistics(
+    start_day: date, end_day: date, *, at: datetime | None = None, tz: tzinfo | None = None,
+) -> PeriodStatistics:
+    """Soma o estudo no intervalo inclusivo de datas locais, sem gravar dados."""
+    if type(start_day) is not date or type(end_day) is not date:
+        raise ValueError("Informe datas válidas para consultar as estatísticas.")
+    if start_day > end_day:
+        raise ValueError("A data final não pode ser anterior à data inicial.")
+    moment = as_utc(at if at is not None else datetime.now(UTC))
+    today = moment.astimezone(tz).date()
+    total = timedelta()
+    with _connection() as connection:
+        if start_day <= today:
+            # A margem UTC seleciona candidatos sem converter datas antigas
+            # pelo SO. Somente seus intervalos reais serão repartidos por dia.
+            first_utc = datetime.combine(start_day, datetime.min.time(), tzinfo=UTC)
+            start = first_utc - timedelta(days=1) if start_day > date.min else first_utc
+            if end_day >= date.max - timedelta(days=1):
+                end = datetime.max.replace(tzinfo=UTC)
+            else:
+                following = end_day + timedelta(days=2)
+                end = datetime.combine(following, datetime.min.time(), tzinfo=UTC)
+            end = min(end, moment)
+            if start < end:
+                candidates = connection.execute(
+                    """
+                    SELECT id FROM sessions
+                    WHERE started_at < ? AND (ended_at IS NULL OR ended_at > ?)
+                    ORDER BY started_at, id
+                    """,
+                    (end.isoformat(), start.isoformat()),
+                ).fetchall()
+                for row in candidates:
+                    session = _read_session(connection, row["id"])
+                    for study_day, seconds in session_study_seconds_by_day(
+                        session, start, end, moment, tz,
+                    ).items():
+                        if start_day <= study_day <= end_day:
+                            total += timedelta(seconds=seconds)
+    return PeriodStatistics(start_day, end_day, moment, total.total_seconds())
 
 
 def _read_streak_base(
