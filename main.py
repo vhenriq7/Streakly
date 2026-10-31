@@ -268,6 +268,10 @@ async def main(page: ft.Page) -> None:
         [ft.Text("Consulte um período para ver o tempo por tipo de estudo.")], spacing=8,
         horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
     )
+    statistics_topics = ft.Column(
+        [ft.Text("Consulte um período para ver o tempo por assunto.")], spacing=8,
+        horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+    )
     home_session = ft.Text()
     home_subjects = ft.ListView(
         controls=[ft.Text("Nenhuma matéria cadastrada ainda.")],
@@ -789,14 +793,12 @@ async def main(page: ft.Page) -> None:
             return statistics_data.start_day, statistics_data.end_day
         return statistics_period(statistics_kind, datetime.now(UTC).astimezone().date())
 
-    def statistics_subject_rows(result: PeriodStatistics) -> list[ft.Control]:
-        """Monta a lista apenas quando chega uma nova consulta do período."""
-        if not result.subjects:
-            return [ft.Text("Nenhum estudo neste período.")]
+    def statistics_subject_labels(result: PeriodStatistics) -> dict[str, str]:
+        """Usa os mesmos nomes e identificadores nas listas de matérias e assuntos."""
         ids_by_name: dict[str, list[str]] = {}
         for item in result.subjects:
             ids_by_name.setdefault(item.subject_name, []).append(item.subject_id)
-        rows = []
+        labels = {}
         for item in result.subjects:
             label = item.subject_name
             duplicate_name = len(ids_by_name[label]) > 1
@@ -806,9 +808,20 @@ async def main(page: ft.Page) -> None:
                 while any(other.startswith(item.subject_id[:prefix_length]) for other in others):
                     prefix_length += 1
                 label += f" ({item.subject_id[:prefix_length]})"
+            labels[item.subject_id] = label
+        return labels
+
+    def statistics_subject_rows(result: PeriodStatistics) -> list[ft.Control]:
+        """Monta a lista apenas quando chega uma nova consulta do período."""
+        if not result.subjects:
+            return [ft.Text("Nenhum estudo neste período.")]
+        labels = statistics_subject_labels(result)
+        rows = []
+        for item in result.subjects:
+            label = labels[item.subject_id]
             rows.append(ft.Row(
                 [ft.Text(label, expand=True,
-                         tooltip=f"Identificador da matéria: {item.subject_id}" if duplicate_name else None),
+                         tooltip=f"Identificador da matéria: {item.subject_id}" if label != item.subject_name else None),
                  ft.Text(format_duration(item.total_seconds))],
                 data=item.subject_id, spacing=12,
             ))
@@ -822,6 +835,22 @@ async def main(page: ft.Page) -> None:
             data=item.study_type, spacing=12,
         ) for item in result.study_types]
 
+    def statistics_topic_rows(result: PeriodStatistics) -> list[ft.Control]:
+        if not result.topics:
+            return [ft.Text("Nenhum estudo neste período.")]
+        labels = statistics_subject_labels(result)
+        return [ft.Row(
+            [ft.Column(
+                [ft.Text(f"Assunto: {item.topic}" if item.topic is not None else "Sem assunto informado",
+                         italic=item.topic is None),
+                 ft.Text(labels[item.subject_id], size=12,
+                         tooltip=f"Identificador da matéria: {item.subject_id}"
+                         if labels[item.subject_id] != item.subject_name else None)],
+                spacing=2, expand=True,
+            ), ft.Text(format_duration(item.total_seconds))],
+            data=(item.subject_id, item.topic), spacing=12,
+        ) for item in result.topics]
+
     async def read_statistics_view(kind: str, start: date, end: date) -> None:
         nonlocal statistics_request, statistics_loading, statistics_data, statistics_kind, statistics_dirty
         request = object()
@@ -833,9 +862,11 @@ async def main(page: ft.Page) -> None:
             if statistics_request is request and connected:
                 rows = statistics_subject_rows(result)
                 type_rows = statistics_type_rows(result)
+                topic_rows = statistics_topic_rows(result)
                 statistics_data, statistics_kind = result, kind
                 statistics_subjects.controls = rows
                 statistics_types.controls = type_rows
+                statistics_topics.controls = topic_rows
                 statistics_dirty = False
                 statistics_error.value = ""
         except (sqlite3.Error, OSError, ValueError, OverflowError):
@@ -1884,7 +1915,8 @@ async def main(page: ft.Page) -> None:
                  "O estudo é contado somente até o instante da consulta."),
          statistics_stamp,
          ft.Text("Tempo por matéria", size=18), statistics_subjects,
-         ft.Text("Tempo por tipo de estudo", size=18), statistics_types],
+         ft.Text("Tempo por tipo de estudo", size=18), statistics_types,
+         ft.Text("Tempo por assunto", size=18), statistics_topics],
         expand=True, visible=False, scroll=ft.ScrollMode.AUTO,
         horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
     )

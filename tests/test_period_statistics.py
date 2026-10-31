@@ -36,9 +36,9 @@ class PeriodStatisticsTests(TemporaryDatabaseTest):
                   "pomodoro_state", "daily_goal_defaults", "daily_goal_overrides")
         return {table: self.execute(f"SELECT * FROM {table} ORDER BY 1") for table in tables}
 
-    def manual(self, started, seconds=60, *, subject="Python", study_type="Leitura", now=NOW):
+    def manual(self, started, seconds=60, *, subject="Python", study_type="Leitura", topic=None, now=NOW):
         return storage.create_manual_session(
-            self.subjects[subject], study_type, started, seconds, at=now,
+            self.subjects[subject], study_type, started, seconds, topic, at=now,
         )
 
     def read(self, start, end, *, moment=NOW, zone=LOCAL):
@@ -65,6 +65,13 @@ class PeriodStatisticsTests(TemporaryDatabaseTest):
         self.assertEqual(result.total_seconds, sum(
             (timedelta(seconds=item.total_seconds) for item in result.study_types), timedelta(),
         ).total_seconds())
+        self.assertIsInstance(result.topics, tuple)
+        self.assertEqual(len({(item.subject_id, item.topic) for item in result.topics}), len(result.topics))
+        self.assertTrue(all(isinstance(item, storage.TopicStatistics) and item.total_seconds > 0
+                            for item in result.topics))
+        self.assertEqual(result.total_seconds, sum(
+            (timedelta(seconds=item.total_seconds) for item in result.topics), timedelta(),
+        ).total_seconds())
         return result
 
     def rows(self, result):
@@ -73,12 +80,16 @@ class PeriodStatisticsTests(TemporaryDatabaseTest):
     def type_rows(self, result):
         return [(item.study_type, item.total_seconds) for item in result.study_types]
 
+    def topic_rows(self, result):
+        return [(item.subject_id, item.subject_name, item.topic, item.total_seconds) for item in result.topics]
+
     def test_totals_sum_subjects_and_the_average_includes_empty_and_future_days(self):
         start, end = date(2026, 10, 28), date(2026, 11, 1)
         empty = self.read(start, end, moment=local(30))
         self.assertEqual((empty.day_count, empty.total_seconds, empty.average_seconds), (5, 0, 0))
         self.assertEqual(empty.subjects, ())
         self.assertEqual(empty.study_types, ())
+        self.assertEqual(empty.topics, ())
         self.manual(local(28, 8), 60)
         self.manual(local(30, 8), 120, subject="SQL")
         result = self.read(start, end, moment=local(30))
@@ -112,6 +123,7 @@ class PeriodStatisticsTests(TemporaryDatabaseTest):
         self.assertEqual((future.day_count, future.total_seconds, future.average_seconds), (2, 0, 0))
         self.assertEqual(future.subjects, ())
         self.assertEqual(future.study_types, ())
+        self.assertEqual(future.topics, ())
         completed = self.read(date(2026, 10, 30), date(2026, 10, 31))
         self.assertEqual(completed.total_seconds, 1200)
 
@@ -288,7 +300,9 @@ with patch.object(storage, 'database_path', return_value=Path(sys.argv[1])):
                       result.as_of.isoformat(), result.day_count, result.total_seconds,
                       result.average_seconds, active.id, active.status,
                       storage.get_subject_timer_settings(active.subject_id).preset,
-                      [item.id for item in storage.read_session_history().sessions]]))
+                      [item.id for item in storage.read_session_history().sessions],
+                      [[item.subject_id, item.subject_name, item.topic, item.total_seconds]
+                       for item in result.topics]]))
 """
         moment = local(30)
         result = subprocess.run(
@@ -298,7 +312,9 @@ with patch.object(storage, 'database_path', return_value=Path(sys.argv[1])):
         )
         self.assertEqual(json.loads(result.stdout),
                          ["2026-10-28", "2026-10-30", moment.astimezone(UTC).isoformat(),
-                          3, 65, 65 / 3, paused.id, "paused", "custom", [saved.id]])
+                          3, 65, 65 / 3, paused.id, "paused", "custom", [saved.id],
+                          [[self.subjects["Python"], "Python", None, 60],
+                           [self.subjects["SQL"], "SQL", None, 5]]])
         self.assertEqual(self.snapshot(), before)
         self.assertEqual(storage.get_active_session(), paused)
 
@@ -569,9 +585,167 @@ with patch.object(storage, 'database_path', return_value=Path(sys.argv[1])):
         self.assertTrue(changed)
         self.assertEqual(self.rows(result), [(self.subjects["Python"], "Python", 60)])
         self.assertEqual(self.type_rows(result), [("Leitura", 60)])
+        self.assertEqual(self.topic_rows(result), [(self.subjects["Python"], "Python", None, 60)])
         current = self.read(selected, selected)
         self.assertEqual(self.rows(current), [(self.subjects["SQL"], "Bancos", 60)])
         self.assertEqual(self.type_rows(current), [("Projeto", 60)])
+        self.assertEqual(self.topic_rows(current), [(self.subjects["SQL"], "Bancos", "Consultas", 60)])
         self.assertEqual((result.total_seconds, current.total_seconds), (60, 60))
         self.assertEqual(self.execute("SELECT * FROM session_events ORDER BY id"), events)
         self.assertEqual(self.execute("PRAGMA foreign_key_check"), [])
+
+    def test_topic_models_are_immutable_and_preserve_all_previous_constructors(self):
+        selected = date(2026, 10, 28)
+        subject = storage.SubjectStatistics(self.subjects["Python"], "Python", 60)
+        study_type = storage.StudyTypeStatistics("Projeto", 60)
+        for previous in (
+            storage.PeriodStatistics(selected, selected, NOW, 0),
+            storage.PeriodStatistics(selected, selected, NOW, 60, (subject,)),
+            storage.PeriodStatistics(selected, selected, NOW, 60, (subject,), (study_type,)),
+        ):
+            self.assertEqual(previous.topics, ())
+            with self.assertRaises(FrozenInstanceError):
+                previous.topics = ()
+        topic = storage.TopicStatistics(self.subjects["Python"], "Python", None, 60)
+        complete = storage.PeriodStatistics(selected, selected, NOW, 60, (subject,), (study_type,), (topic,))
+        self.assertEqual(complete.topics, (topic,))
+        for name, value in (("subject_id", self.subjects["SQL"]), ("subject_name", "Outro"),
+                            ("topic", "Funções"), ("total_seconds", 120)):
+            with self.subTest(field=name):
+                with self.assertRaises(FrozenInstanceError):
+                    setattr(topic, name, value)
+
+    def test_same_topic_combines_study_types_only_inside_its_own_subject(self):
+        self.manual(local(28, 8), 60, study_type="Leitura", topic="Funções")
+        self.manual(local(28, 9), 120, study_type="Exercícios", topic="Funções")
+        self.manual(local(28, 10), 90, subject="SQL", study_type="Leitura", topic="Funções")
+        self.manual(local(28, 11), 30, study_type="Aula", topic="Laços")
+        selected = date(2026, 10, 28)
+        result = self.read(selected, selected)
+        self.assertEqual(self.topic_rows(result),
+                         [(self.subjects["Python"], "Python", "Funções", 180),
+                          (self.subjects["SQL"], "SQL", "Funções", 90),
+                          (self.subjects["Python"], "Python", "Laços", 30)])
+        self.assertEqual(self.rows(result), [(self.subjects["Python"], "Python", 210),
+                                            (self.subjects["SQL"], "SQL", 90)])
+        self.assertEqual(self.type_rows(result), [("Leitura", 150), ("Exercícios", 120), ("Aula", 30)])
+        self.assertEqual(result.total_seconds, 300)
+
+    def test_topic_sorting_preserves_case_and_unicode_instead_of_merging_names(self):
+        names = ("beta", "alpha", "Alpha", "Straße", "STRASSE", "Revisão", "Revisa\u0303o")
+        for index, topic in enumerate(names):
+            self.manual(local(28, 8, index * 3), 120 if topic == "beta" else 30, topic=topic)
+        result = self.read(date(2026, 10, 28), date(2026, 10, 28))
+        self.assertEqual([(item.topic, item.total_seconds) for item in result.topics],
+                         [("beta", 120), ("Alpha", 30), ("alpha", 30), ("Revisa\u0303o", 30),
+                          ("Revisão", 30), ("STRASSE", 30), ("Straße", 30)])
+        self.assertEqual((len(result.topics), result.total_seconds), (len(names), 300))
+
+    def test_topic_ties_use_current_subject_name_and_uuid_even_for_homonymous_subjects(self):
+        storage.rename_subject(self.subjects["SQL"], "SQL", "Python")
+        for index, subject in enumerate(("Python", "SQL")):
+            self.manual(local(28, 8, index * 3), 60, subject=subject, topic="Mesmo assunto")
+        names = ("beta", "alpha", "Alpha", "Straße", "STRASSE")
+        keys = {}
+        for index, name in enumerate(names):
+            storage.add_subject(name)
+            keys[name] = next(key for key, option in storage.list_subject_options() if option == name)
+            storage.create_manual_session(keys[name], "Leitura", local(28, 9, index * 3),
+                                          30, "Mesmo assunto", at=NOW)
+        result = self.read(date(2026, 10, 28), date(2026, 10, 28))
+        expected = [(key, "Python", "Mesmo assunto", 60) for key in sorted(self.subjects.values())]
+        expected.extend((keys[name], name, "Mesmo assunto", 30)
+                        for name in ("Alpha", "alpha", "beta", "STRASSE", "Straße"))
+        self.assertEqual(self.topic_rows(result), expected)
+        self.assertEqual(result.total_seconds, 270)
+
+    def test_missing_literal_and_legacy_blank_topics_remain_distinct_without_rewriting_data(self):
+        self.manual(local(28, 8), 30)
+        self.manual(local(28, 8, 3), 30)
+        empty = self.manual(local(28, 8, 6), 60, topic="Antigo vazio")
+        spaces = self.manual(local(28, 8, 9), 60, topic="Antigo espaço")
+        self.manual(local(28, 8, 12), 60, topic="Sem assunto informado")
+        with closing(sqlite3.connect(self.path)) as connection:
+            with connection:
+                connection.execute("UPDATE sessions SET topic = '' WHERE id = ?", (empty.id,))
+                connection.execute("UPDATE sessions SET topic = ' ' WHERE id = ?", (spaces.id,))
+        result = self.read(date(2026, 10, 28), date(2026, 10, 28))
+        self.assertEqual([(item.topic, item.total_seconds) for item in result.topics],
+                         [(None, 60), ("", 60), (" ", 60), ("Sem assunto informado", 60)])
+        self.assertEqual(result.total_seconds, 240)
+
+    def test_topic_and_subject_corrections_renaming_and_deletions_recalculate_without_event_changes(self):
+        saved = self.manual(local(28, 8), 60, topic="Funções")
+        self.manual(local(28, 9), 120, subject="SQL", topic="Funções")
+        selected = date(2026, 10, 28)
+        old = self.read(selected, selected)
+        events = self.execute("SELECT * FROM session_events ORDER BY id")
+        edited = storage.update_finished_session(saved, self.subjects["SQL"], "Projeto", "Consultas", at=NOW)
+        storage.rename_subject(self.subjects["SQL"], "SQL", "Bancos")
+        result = self.read(selected, selected)
+        self.assertEqual(self.topic_rows(result), [(self.subjects["SQL"], "Bancos", "Funções", 120),
+                                                  (self.subjects["SQL"], "Bancos", "Consultas", 60)])
+        self.assertEqual(self.topic_rows(old), [(self.subjects["SQL"], "SQL", "Funções", 120),
+                                               (self.subjects["Python"], "Python", "Funções", 60)])
+        self.assertEqual((edited.id, result.total_seconds), (saved.id, old.total_seconds))
+        self.assertEqual(self.execute("SELECT * FROM session_events ORDER BY id"), events)
+        # A renomeação altera o snapshot da sessão; reler antes da próxima edição.
+        current = next(item for item in storage.read_session_history().sessions if item.id == saved.id)
+        merged = storage.update_finished_session(current, current.subject_id, current.study_type, "Funções", at=NOW)
+        self.assertEqual(self.topic_rows(self.read(selected, selected)),
+                         [(self.subjects["SQL"], "Bancos", "Funções", 180)])
+        self.assertEqual(self.execute("SELECT * FROM session_events ORDER BY id"), events)
+        moved = storage.update_finished_session(merged, merged.subject_id, merged.study_type, merged.topic,
+                                               started_at=local(29, 8), duration_seconds=90, at=NOW)
+        self.assertEqual(self.topic_rows(self.read(selected, selected)),
+                         [(self.subjects["SQL"], "Bancos", "Funções", 120)])
+        self.assertEqual(self.topic_rows(self.read(date(2026, 10, 29), date(2026, 10, 29))),
+                         [(self.subjects["SQL"], "Bancos", "Funções", 90)])
+        storage.delete_finished_session(moved)
+        self.assertEqual(self.topic_rows(self.read(selected, date(2026, 10, 29))),
+                         [(self.subjects["SQL"], "Bancos", "Funções", 120)])
+        storage.delete_subject(storage.read_subject_deletion_preview(self.subjects["SQL"]))
+        self.assertEqual(self.read(selected, date(2026, 10, 29)).topics, ())
+
+    def test_topics_combine_manual_progressive_and_pomodoro_while_excluding_pauses_and_future_time(self):
+        self.manual(local(28, 8), 60, topic="Funções")
+        selected = date(2026, 10, 28)
+        progressive = storage.start_session(self.subjects["SQL"], "Projeto", "Funções", at=local(28, 9))
+        self.assertEqual(self.topic_rows(self.read(selected, selected, moment=local(28, 9))),
+                         [(self.subjects["Python"], "Python", "Funções", 60)])
+        storage.pause_session(progressive.id, at=local(28, 9, 0, 10))
+        running = storage.resume_session(progressive.id, at=local(28, 10))
+        self.assertEqual(self.topic_rows(self.read(selected, selected, moment=local(28, 10, 0, 5))),
+                         [(self.subjects["Python"], "Python", "Funções", 60),
+                          (self.subjects["SQL"], "SQL", "Funções", 15)])
+        self.assertEqual(storage.get_active_session(), running)
+        storage.finish_session(progressive.id, at=local(28, 10, 0, 5))
+        focus = storage.start_session(self.subjects["Python"], "Aula", "Funções", mode="pomodoro",
+                                      focus_seconds=20, break_seconds=10, at=local(28, 11))
+        self.assertEqual(self.topic_rows(self.read(selected, selected, moment=local(28, 11, 0, 10))),
+                         [(self.subjects["Python"], "Python", "Funções", 70),
+                          (self.subjects["SQL"], "SQL", "Funções", 15)])
+        self.assertEqual(self.topic_rows(self.read(selected, selected)),
+                         [(self.subjects["Python"], "Python", "Funções", 80),
+                          (self.subjects["SQL"], "SQL", "Funções", 15)])
+        self.assertEqual(storage.get_active_session(), focus)
+        storage.refresh_active_session(at=local(28, 11, 0, 20))
+        in_break = storage.start_next_phase(focus.id, at=local(28, 12))
+        self.assertEqual(self.topic_rows(self.read(selected, selected)),
+                         [(self.subjects["Python"], "Python", "Funções", 80),
+                          (self.subjects["SQL"], "SQL", "Funções", 15)])
+        self.assertEqual(storage.get_active_session(), in_break)
+        self.assertEqual(self.read(date(2026, 10, 29), date(2026, 10, 29)).topics, ())
+
+    def test_each_topic_preserves_microseconds_and_partitions_the_total_including_missing_topics(self):
+        entries = (("Python", "Funções", 1), ("Python", "Funções", 2),
+                   ("SQL", "Funções", 999996), ("SQL", None, 1))
+        for index, (subject, topic, microseconds) in enumerate(entries):
+            started = local(28, 8, index)
+            active = storage.start_session(self.subjects[subject], "Aula", topic, at=started)
+            storage.finish_session(active.id, at=started + timedelta(microseconds=microseconds))
+        result = self.read(date(2026, 10, 28), date(2026, 10, 28))
+        self.assertEqual(self.topic_rows(result), [(self.subjects["SQL"], "SQL", "Funções", .999996),
+                                                  (self.subjects["Python"], "Python", "Funções", .000003),
+                                                  (self.subjects["SQL"], "SQL", None, .000001)])
+        self.assertEqual((result.total_seconds, result.average_seconds), (1, 1))
