@@ -260,6 +260,10 @@ async def main(page: ft.Page) -> None:
     statistics_average = ft.Text("—", size=32)
     statistics_days = ft.Text()
     statistics_stamp = ft.Text(size=12)
+    statistics_subjects = ft.Column(
+        [ft.Text("Consulte um período para ver o tempo por matéria.")], spacing=8,
+        horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+    )
     home_session = ft.Text()
     home_subjects = ft.ListView(
         controls=[ft.Text("Nenhuma matéria cadastrada ainda.")],
@@ -417,7 +421,8 @@ async def main(page: ft.Page) -> None:
         if [(item.key, item.text) for item in dropdown.options] != options:
             dropdown.options = [ft.DropdownOption(key=key, text=name) for key, name in options]
 
-    async def refresh_state(*, reload_study_types: bool = False, reload_streak: bool = False) -> None:
+    async def refresh_state(*, reload_study_types: bool = False, reload_streak: bool = False,
+                            reload_statistics: bool = False) -> None:
         nonlocal session, subject_options, settings_subject, ready, today, today_seconds
         nonlocal subject_selection_removed, recorded_study_types, daily_goal, today_override
         nonlocal streak_base, streak_zone_key
@@ -505,7 +510,7 @@ async def main(page: ft.Page) -> None:
         if calendar_panel.visible and month_dirty and (reload_streak or zone_changed):
             await read_month_view(month_data.year if month_data else today.year,
                                   month_data.month if month_data else today.month)
-        if statistics_panel.visible and statistics_dirty and (reload_streak or zone_changed):
+        if statistics_panel.visible and statistics_dirty and (reload_streak or zone_changed or reload_statistics):
             await read_statistics_view(statistics_kind, *applied_statistics_period())
 
     def render() -> None:
@@ -780,6 +785,31 @@ async def main(page: ft.Page) -> None:
             return statistics_data.start_day, statistics_data.end_day
         return statistics_period(statistics_kind, datetime.now(UTC).astimezone().date())
 
+    def statistics_subject_rows(result: PeriodStatistics) -> list[ft.Control]:
+        """Monta a lista apenas quando chega uma nova consulta do período."""
+        if not result.subjects:
+            return [ft.Text("Nenhum estudo neste período.")]
+        ids_by_name: dict[str, list[str]] = {}
+        for item in result.subjects:
+            ids_by_name.setdefault(item.subject_name, []).append(item.subject_id)
+        rows = []
+        for item in result.subjects:
+            label = item.subject_name
+            duplicate_name = len(ids_by_name[label]) > 1
+            if duplicate_name:
+                others = [key for key in ids_by_name[label] if key != item.subject_id]
+                prefix_length = 8
+                while any(other.startswith(item.subject_id[:prefix_length]) for other in others):
+                    prefix_length += 1
+                label += f" ({item.subject_id[:prefix_length]})"
+            rows.append(ft.Row(
+                [ft.Text(label, expand=True,
+                         tooltip=f"Identificador da matéria: {item.subject_id}" if duplicate_name else None),
+                 ft.Text(format_duration(item.total_seconds))],
+                data=item.subject_id, spacing=12,
+            ))
+        return rows
+
     async def read_statistics_view(kind: str, start: date, end: date) -> None:
         nonlocal statistics_request, statistics_loading, statistics_data, statistics_kind, statistics_dirty
         request = object()
@@ -789,7 +819,9 @@ async def main(page: ft.Page) -> None:
         try:
             result = await asyncio.to_thread(read_period_statistics, start, end, at=datetime.now(UTC))
             if statistics_request is request and connected:
+                rows = statistics_subject_rows(result)
                 statistics_data, statistics_kind = result, kind
+                statistics_subjects.controls = rows
                 statistics_dirty = False
                 statistics_error.value = ""
         except (sqlite3.Error, OSError, ValueError, OverflowError):
@@ -1209,7 +1241,7 @@ async def main(page: ft.Page) -> None:
             render()
 
     async def save_subject_name(event) -> None:
-        nonlocal busy, ready, renaming_subject, rename_saving
+        nonlocal busy, ready, renaming_subject, rename_saving, statistics_dirty
         if busy or not ready or rename_saving or history_loading or renaming_subject is None:
             return
         new_name = (rename_name.value or "").strip()
@@ -1224,10 +1256,11 @@ async def main(page: ft.Page) -> None:
         async with state_lock:
             try:
                 await asyncio.to_thread(rename_subject, subject_id, expected_name, new_name)
+                statistics_dirty = True
                 saved = True
                 renaming_subject = None
                 message.value = f"Matéria renomeada para {new_name}."
-                await refresh_state()
+                await refresh_state(reload_statistics=True)
             except ValueError as error:
                 if saved:
                     ready = False
@@ -1835,7 +1868,8 @@ async def main(page: ft.Page) -> None:
          ft.Text("Média diária", size=18), statistics_average, statistics_days,
          ft.Text("A média inclui todos os dias do intervalo escolhido, inclusive descanso e datas futuras. "
                  "O estudo é contado somente até o instante da consulta."),
-         statistics_stamp],
+         statistics_stamp,
+         ft.Text("Tempo por matéria", size=18), statistics_subjects],
         expand=True, visible=False, scroll=ft.ScrollMode.AUTO,
         horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
     )

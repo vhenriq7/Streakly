@@ -75,11 +75,19 @@ class MonthlyCalendar:
 
 
 @dataclass(frozen=True)
+class SubjectStatistics:
+    subject_id: str
+    subject_name: str
+    total_seconds: float
+
+
+@dataclass(frozen=True)
 class PeriodStatistics:
     start_day: date
     end_day: date
     as_of: datetime
     total_seconds: float
+    subjects: tuple[SubjectStatistics, ...] = ()
 
     @property
     def day_count(self) -> int:
@@ -757,14 +765,15 @@ def read_monthly_calendar(
 def read_period_statistics(
     start_day: date, end_day: date, *, at: datetime | None = None, tz: tzinfo | None = None,
 ) -> PeriodStatistics:
-    """Soma o estudo no intervalo inclusivo de datas locais, sem gravar dados."""
+    """Soma o estudo por matéria no intervalo de datas locais, sem gravar dados."""
     if type(start_day) is not date or type(end_day) is not date:
         raise ValueError("Informe datas válidas para consultar as estatísticas.")
     if start_day > end_day:
         raise ValueError("A data final não pode ser anterior à data inicial.")
     moment = as_utc(at if at is not None else datetime.now(UTC))
     today = moment.astimezone(tz).date()
-    total = timedelta()
+    subject_totals: dict[str, timedelta] = {}
+    subject_names: dict[str, str] = {}
     with _connection() as connection:
         if start_day <= today:
             # A margem UTC seleciona candidatos sem converter datas antigas
@@ -788,12 +797,29 @@ def read_period_statistics(
                 ).fetchall()
                 for row in candidates:
                     session = _read_session(connection, row["id"])
+                    duration = timedelta()
                     for study_day, seconds in session_study_seconds_by_day(
                         session, start, end, moment, tz,
                     ).items():
                         if start_day <= study_day <= end_day:
-                            total += timedelta(seconds=seconds)
-    return PeriodStatistics(start_day, end_day, moment, total.total_seconds())
+                            duration += timedelta(seconds=seconds)
+                    if duration > timedelta():
+                        subject_totals[session.subject_id] = (
+                            subject_totals.get(session.subject_id, timedelta()) + duration
+                        )
+                        subject_names[session.subject_id] = session.subject_name
+    # UUIDs mantêm matérias homônimas separadas. A duração só vira float
+    # depois das somas e da ordenação, preservando frações de segundo.
+    ordered_ids = sorted(subject_totals, key=lambda subject_id: (
+        -subject_totals[subject_id], subject_names[subject_id].casefold(),
+        subject_names[subject_id], subject_id,
+    ))
+    subjects = tuple(
+        SubjectStatistics(subject_id, subject_names[subject_id], subject_totals[subject_id].total_seconds())
+        for subject_id in ordered_ids
+    )
+    total = sum(subject_totals.values(), timedelta())
+    return PeriodStatistics(start_day, end_day, moment, total.total_seconds(), subjects)
 
 
 def _read_streak_base(

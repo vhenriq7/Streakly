@@ -2,7 +2,7 @@
 
 Aplicativo pessoal de acompanhamento de estudos para **Windows e Android**, com registro de tempo, Pomodoro, metas diárias, ofensivas (streaks), calendário e estatísticas. Projeto **offline-first**: os dados são gravados localmente e sincronizados com a nuvem quando houver conexão.
 
-> **Status:** início do MVP offline. A versão 0.17.0 acrescentou a grade mensal do Calendário e passou nos 186 testes automatizados. A etapa local 0.18.0 inicia Estatísticas com total e média diária por período; os 198 testes e a integração com controles Flet passaram. Falta a conferência na janela do Windows. As provas de conceito anteriores validaram persistência no Windows/Android, cronômetro progressivo no Windows e exibição do aviso de foco concluído no Windows, este confirmado pelo usuário em 28/10/2026. Avisos Android e com o app fechado seguem pendentes, nos marcos combinados.
+> **Status:** início do MVP offline. A versão 0.18.0 iniciou Estatísticas com total e média diária por período; os 198 testes e a integração com controles Flet passaram. A etapa local 0.19.0 acrescenta o tempo por matéria ao mesmo período; os 206 testes e a integração com controles Flet passaram. Falta a conferência na janela do Windows. As provas de conceito anteriores validaram persistência no Windows/Android, cronômetro progressivo no Windows e exibição do aviso de foco concluído no Windows, este confirmado pelo usuário em 28/10/2026. Avisos Android e com o app fechado seguem pendentes, nos marcos combinados.
 
 ## Funcionalidades planejadas
 
@@ -247,7 +247,15 @@ A média divide o tempo pelo número de dias do intervalo, incluindo dias sem es
 
 Os indicadores mostram a consulta mais recente e seu período aplicado. **Aplicar período** consulta os filtros preenchidos; **Atualizar estatísticas** e reabrir a tela recarregam o período aplicado, preservando o rascunho. Gravações relevantes atualizam os resultados quando a tela está visível; não há consulta de estatísticas a cada segundo. Navegar preserva o preenchimento personalizado, inclusive parcial. Falhas mantêm o período e os resultados anteriores com aviso.
 
-Os 198 testes automatizados e a integração com controles Flet passaram, usando bancos temporários. Falta a conferência na janela nativa do Windows. Para conferir, abra Estatísticas, compare Hoje com Mês atual e aplique um intervalo personalizado que inclua um dia sem estudo. A consulta não altera o banco; o esquema continua na versão 7, sem dependências novas ou APK. Divisões por matéria, tipo e assunto, além dos gráficos, ficam para as próximas etapas.
+Os 198 testes automatizados e a integração com controles Flet passaram, usando bancos temporários. Falta a conferência na janela nativa do Windows. Para conferir, abra Estatísticas, compare Hoje com Mês atual e aplique um intervalo personalizado que inclua um dia sem estudo. A consulta não altera o banco; o esquema continua na versão 7, sem dependências novas ou APK. A divisão por matéria foi acrescentada na 0.19.0; divisões por tipo e assunto e gráficos ficam para as próximas etapas.
+
+### Tempo por matéria — versão 0.19.0
+
+Em **Estatísticas**, a lista **Tempo por matéria** mostra as matérias com estudo efetivo no período aplicado, da maior duração para a menor. Nomes iguais continuam sendo matérias distintas; nesses casos, a lista acrescenta uma identificação para distingui-las. Empates têm ordenação determinística pelo nome e identificador. Um período sem estudo mostra uma mensagem, sem preencher a lista com matérias de duração zero.
+
+A lista, o total e a média usam a mesma consulta e o mesmo instante de corte. As durações seguem as regras já existentes de dia local, pausas, espera e foco Pomodoro. Renomear uma matéria muda o nome exibido na próxima consulta; corrigir a matéria de uma sessão ou excluir estudos recalcula a distribuição. Os filtros, rascunhos e botões Aplicar período/Atualizar estatísticas continuam compartilhados; uma falha mantém juntos os resultados e a lista anteriores, com aviso. Não há consulta por matéria a cada segundo.
+
+Os 206 testes automatizados e a integração com controles Flet passaram, usando bancos temporários. A integração verificou nomes iguais, filtros, ausência de estudo, renomeação durante navegação, correções de matéria, exclusões, falhas e reabertura. Falta a conferência na janela nativa do Windows: abra Estatísticas, compare a lista em Hoje e Mês atual e aplique um intervalo personalizado sem estudo. O esquema permanece na versão 7, sem dependências novas ou APK. Divisões por tipo e assunto e gráficos ficam para as próximas etapas.
 
 ## Princípios de desenvolvimento
 

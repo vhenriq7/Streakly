@@ -50,18 +50,32 @@ class PeriodStatisticsTests(TemporaryDatabaseTest):
         self.assertEqual(result.as_of.tzinfo, UTC)
         self.assertEqual(result.day_count, (end - start).days + 1)
         self.assertEqual(result.average_seconds, result.total_seconds / result.day_count)
+        self.assertIsInstance(result.subjects, tuple)
+        self.assertEqual(len({item.subject_id for item in result.subjects}), len(result.subjects))
+        self.assertTrue(all(isinstance(item, storage.SubjectStatistics) and item.total_seconds > 0
+                            for item in result.subjects))
+        self.assertEqual(result.total_seconds, sum(
+            (timedelta(seconds=item.total_seconds) for item in result.subjects), timedelta(),
+        ).total_seconds())
         return result
+
+    def rows(self, result):
+        return [(item.subject_id, item.subject_name, item.total_seconds) for item in result.subjects]
 
     def test_totals_sum_subjects_and_the_average_includes_empty_and_future_days(self):
         start, end = date(2026, 10, 28), date(2026, 11, 1)
         empty = self.read(start, end, moment=local(30))
         self.assertEqual((empty.day_count, empty.total_seconds, empty.average_seconds), (5, 0, 0))
+        self.assertEqual(empty.subjects, ())
         self.manual(local(28, 8), 60)
         self.manual(local(30, 8), 120, subject="SQL")
         result = self.read(start, end, moment=local(30))
         self.assertEqual((result.day_count, result.total_seconds, result.average_seconds), (5, 180, 36))
+        self.assertEqual(self.rows(result), [(self.subjects["SQL"], "SQL", 120),
+                                             (self.subjects["Python"], "Python", 60)])
         single = self.read(date(2026, 10, 30), date(2026, 10, 30), moment=local(30))
         self.assertEqual((single.day_count, single.total_seconds, single.average_seconds), (1, 120, 120))
+        self.assertEqual(self.rows(single), [(self.subjects["SQL"], "SQL", 120)])
         self.assertEqual(empty.total_seconds, 0)
         self.assertEqual(self.execute("PRAGMA user_version"), [(7,)])
         self.assertEqual(self.execute("PRAGMA foreign_key_check"), [])
@@ -84,6 +98,7 @@ class PeriodStatisticsTests(TemporaryDatabaseTest):
         self.assertEqual((result.total_seconds, result.average_seconds), (300, 150))
         future = self.read(date(2026, 10, 31), date(2026, 11, 1), moment=local(30, 8, 5))
         self.assertEqual((future.day_count, future.total_seconds, future.average_seconds), (2, 0, 0))
+        self.assertEqual(future.subjects, ())
         completed = self.read(date(2026, 10, 30), date(2026, 10, 31))
         self.assertEqual(completed.total_seconds, 1200)
 
@@ -94,6 +109,7 @@ class PeriodStatisticsTests(TemporaryDatabaseTest):
         moment = local(30, 8, 0, 20)
         current = self.read(date(2026, 10, 29), date(2026, 10, 30), moment=moment)
         self.assertEqual((current.total_seconds, current.average_seconds), (30, 15))
+        self.assertEqual(self.rows(current), [(self.subjects["Python"], "Python", 30)])
         self.assertEqual(self.read(date(2026, 10, 28), date(2026, 10, 28), moment=moment).total_seconds, 20)
         self.assertEqual(storage.get_active_session(), running)
         paused = storage.pause_session(active.id, at=moment)
@@ -215,6 +231,7 @@ class PeriodStatisticsTests(TemporaryDatabaseTest):
             result = storage.read_period_statistics(start, end, at=NOW, tz=LOCAL)
         self.assertTrue(changed)
         self.assertEqual((result.day_count, result.total_seconds), (365, 60))
+        self.assertEqual(self.rows(result), [(self.subjects["Python"], "Python", 60)])
         selects = [sql for sql in statements if sql.lstrip().upper().startswith("SELECT")]
         self.assertLess(len(selects), 15, "A consulta não deve buscar cada dia do período separadamente.")
         self.assertEqual(self.read(start, end).total_seconds, 0)
@@ -270,3 +287,125 @@ with patch.object(storage, 'database_path', return_value=Path(sys.argv[1])):
                           3, 65, 65 / 3, paused.id, "paused", "custom", [saved.id]])
         self.assertEqual(self.snapshot(), before)
         self.assertEqual(storage.get_active_session(), paused)
+
+    def test_equal_subject_names_remain_separate_and_tie_by_uuid(self):
+        storage.rename_subject(self.subjects["SQL"], "SQL", "Python")
+        self.manual(local(28, 8), 60)
+        self.manual(local(28, 9), 60, subject="SQL")
+        result = self.read(date(2026, 10, 28), date(2026, 10, 28))
+        self.assertEqual(self.rows(result), [(key, "Python", 60) for key in sorted(self.subjects.values())])
+        self.assertEqual(result.total_seconds, 120)
+
+    def test_subjects_sort_by_duration_then_unicode_name_and_exact_name(self):
+        names = ("beta", "alpha", "Alpha", "Straße", "STRASSE")
+        for index, name in enumerate(names):
+            storage.add_subject(name)
+            key = next(key for key, option in storage.list_subject_options() if option == name)
+            storage.create_manual_session(key, "Leitura", local(28, 9, index * 3),
+                                          120 if name == "beta" else 30, at=NOW)
+        result = self.read(date(2026, 10, 28), date(2026, 10, 28))
+        self.assertEqual([(item.subject_name, item.total_seconds) for item in result.subjects],
+                         [("beta", 120), ("Alpha", 30), ("alpha", 30), ("STRASSE", 30), ("Straße", 30)])
+        self.assertEqual(result.total_seconds, 240)
+
+    def test_renaming_uses_current_names_and_preserves_the_previous_result(self):
+        self.manual(local(28, 8), 60)
+        selected = date(2026, 10, 28)
+        old = self.read(selected, selected)
+        storage.rename_subject(self.subjects["Python"], "Python", "Programação")
+        result = self.read(selected, selected)
+        self.assertEqual(self.rows(result), [(self.subjects["Python"], "Programação", 60)])
+        self.assertEqual(self.rows(old), [(self.subjects["Python"], "Python", 60)])
+        self.assertEqual((result.total_seconds, old.total_seconds), (60, 60))
+
+    def test_reclassifying_moves_time_between_subjects_without_changing_events(self):
+        saved = self.manual(local(28, 8), 60)
+        self.manual(local(28, 9), 120, subject="SQL")
+        selected = date(2026, 10, 28)
+        old = self.read(selected, selected)
+        events = self.execute("SELECT * FROM session_events ORDER BY id")
+        edited = storage.update_finished_session(saved, self.subjects["SQL"], "Projeto", "Junções", at=NOW)
+        result = self.read(selected, selected)
+        self.assertEqual(self.rows(result), [(self.subjects["SQL"], "SQL", 180)])
+        self.assertEqual(self.rows(old), [(self.subjects["SQL"], "SQL", 120),
+                                          (self.subjects["Python"], "Python", 60)])
+        self.assertEqual((edited.id, result.total_seconds), (saved.id, old.total_seconds))
+        self.assertEqual(self.execute("SELECT * FROM session_events ORDER BY id"), events)
+        storage.delete_finished_session(edited)
+        self.assertEqual(self.rows(self.read(selected, selected)), [(self.subjects["SQL"], "SQL", 120)])
+        storage.delete_subject(storage.read_subject_deletion_preview(self.subjects["SQL"]))
+        self.assertEqual(self.read(selected, selected).subjects, ())
+
+    def test_one_subject_combines_manual_timer_and_pomodoro_with_different_classifications(self):
+        self.manual(local(28, 8), 60)
+        active = storage.start_session(self.subjects["Python"], "Aula", "Funções", at=local(28, 9))
+        storage.finish_session(active.id, at=local(28, 9, 0, 10))
+        self.manual(local(28, 10), 15, subject="SQL")
+        active = storage.start_session(self.subjects["Python"], "Projeto", "Laços", mode="pomodoro",
+                                       focus_seconds=10, break_seconds=5, at=local(28, 11))
+        result = self.read(date(2026, 10, 28), date(2026, 10, 28))
+        self.assertEqual(self.rows(result), [(self.subjects["Python"], "Python", 80),
+                                             (self.subjects["SQL"], "SQL", 15)])
+        self.assertEqual(result.total_seconds, 95)
+        self.assertEqual(storage.get_active_session(), active)
+
+    def test_zero_time_active_and_finished_sessions_do_not_create_subject_rows(self):
+        self.manual(local(28, 8), 60, subject="SQL")
+        started = local(28, 9)
+        active = storage.start_session(self.subjects["Python"], "Aula", at=started)
+        selected = date(2026, 10, 28)
+        self.assertEqual(self.rows(self.read(selected, selected, moment=started)),
+                         [(self.subjects["SQL"], "SQL", 60)])
+        storage.pause_session(active.id, at=started)
+        self.assertEqual(self.rows(self.read(selected, selected)), [(self.subjects["SQL"], "SQL", 60)])
+        storage.finish_session(active.id, at=started)
+        self.assertEqual(self.rows(self.read(selected, selected)), [(self.subjects["SQL"], "SQL", 60)])
+
+    def test_microseconds_are_preserved_in_each_subject_and_the_combined_total(self):
+        for index, (subject, microseconds) in enumerate((("Python", 1), ("Python", 2), ("SQL", 999997))):
+            started = local(28, 8, index)
+            active = storage.start_session(self.subjects[subject], "Aula", at=started)
+            storage.finish_session(active.id, at=started + timedelta(microseconds=microseconds))
+        result = self.read(date(2026, 10, 28), date(2026, 10, 28))
+        self.assertEqual(self.rows(result), [(self.subjects["SQL"], "SQL", .999997),
+                                             (self.subjects["Python"], "Python", .000003)])
+        self.assertEqual(result.total_seconds, 1)
+
+    def test_concurrent_renaming_and_reclassification_cannot_mix_subject_snapshots(self):
+        saved = self.manual(local(28, 8), 60)
+        self.execute("PRAGMA journal_mode = WAL")
+        original_connection = storage._connection
+        changed = False
+
+        @contextmanager
+        def interleaved_connection(*, write=False):
+            nonlocal changed
+            self.assertFalse(write)
+            with original_connection(write=write) as connection:
+                select_count = 0
+
+                def trace(sql):
+                    nonlocal select_count, changed
+                    if sql.lstrip().upper().startswith("SELECT"):
+                        select_count += 1
+                        if select_count == 2 and not changed:
+                            changed = True
+                            with closing(sqlite3.connect(self.path)) as writer:
+                                with writer:
+                                    writer.execute("UPDATE subjects SET name = 'Linguagens' WHERE id = ?",
+                                                   (self.subjects["Python"],))
+                                    writer.execute("UPDATE subjects SET name = 'Bancos' WHERE id = ?",
+                                                   (self.subjects["SQL"],))
+                                    writer.execute("UPDATE sessions SET subject_id = ? WHERE id = ?",
+                                                   (self.subjects["SQL"], saved.id))
+
+                connection.set_trace_callback(trace)
+                yield connection
+
+        selected = date(2026, 10, 28)
+        with patch.object(storage, "_connection", side_effect=interleaved_connection):
+            result = storage.read_period_statistics(selected, selected, at=NOW, tz=LOCAL)
+        self.assertTrue(changed)
+        self.assertEqual(self.rows(result), [(self.subjects["Python"], "Python", 60)])
+        self.assertEqual(self.rows(self.read(selected, selected)), [(self.subjects["SQL"], "Bancos", 60)])
+        self.assertEqual(self.execute("PRAGMA foreign_key_check"), [])
