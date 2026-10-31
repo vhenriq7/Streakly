@@ -2,7 +2,7 @@
 
 Aplicativo pessoal de acompanhamento de estudos para **Windows e Android**, com registro de tempo, Pomodoro, metas diárias, ofensivas (streaks), calendário e estatísticas. Projeto **offline-first**: os dados são gravados localmente e sincronizados com a nuvem quando houver conexão.
 
-> **Status:** início do MVP offline. A versão 0.23.0 acrescentou barras de comparação por tipo de estudo e assunto; os 222 testes de regressão e a integração com controles Flet passaram. A etapa local 0.24.0 acrescenta a preferência de acompanhar o sistema, tema claro ou escuro em Configurações; os 230 testes e a integração com controles Flet passaram. A conferência na janela do Windows permanece pendente. As provas de conceito anteriores validaram persistência no Windows/Android, cronômetro progressivo no Windows e exibição do aviso de foco concluído no Windows, este confirmado pelo usuário em 28/10/2026. Avisos Android e com o app fechado seguem pendentes, nos marcos combinados.
+> **Status:** início do MVP offline. A versão 0.24.0, com preferência de acompanhar o sistema, tema claro ou escuro em Configurações, está no GitHub; os 230 testes e a integração com controles Flet passaram. A etapa local 0.25.0 adapta a navegação à largura da janela, com menu lateral ou inferior; os 236 testes passaram, incluindo integração com controles Flet. A conferência na janela do Windows permanece pendente. As provas de conceito anteriores validaram persistência no Windows/Android, cronômetro progressivo no Windows e exibição do aviso de foco concluído no Windows, este confirmado pelo usuário em 28/10/2026. Avisos Android e com o app fechado seguem pendentes, nos marcos combinados.
 
 ## Funcionalidades planejadas
 
@@ -294,6 +294,14 @@ Em **Configurações → Aparência**, escolha **Acompanhar o sistema**, **Claro
 Navegar preserva a escolha ainda não salva; **Cancelar tema** restaura a preferência carregada sem gravar. **Atualizar tema** consulta e aplica a preferência persistida, incluindo alterações feitas por outra janela, e preserva uma seleção diferente que esteja em edição. Se outra janela mudar a configuração desde a leitura, salvar recusa sobrescrevê-la e orienta atualizar. Falhas de leitura ou gravação mantêm a aparência e o preenchimento; falha ao aplicar a aparência depois de gravar informa que o tema já foi salvo.
 
 O esquema 8 acrescenta `app_settings`, preservando matérias, estudos, metas e preferências existentes. Não há consulta de tema no tick do cronômetro, dependências novas ou APK. Os 230 testes e a integração com controles Flet passaram, usando bancos temporários. Foram verificados migração, concorrência, rollback, rascunhos, falhas antes/depois da gravação, clique duplicado, leituras tardias, recuperação e reabertura. O banco pessoal não foi usado nos testes. Para conferir na janela do Windows, experimente selecionar sem salvar, cancelar, salvar Claro/Escuro e fechar e reabrir o app; essa conferência permanece pendente.
+
+### Navegação adaptável — versão 0.25.0
+
+O menu fica na lateral quando a largura da janela é de **800 pixels ou mais**. Abaixo disso, fica na base e permite **rolagem horizontal** para alcançar todos os destinos: Início, Matérias, Cronômetro, Histórico, Configurações, Calendário e Estatísticas. A tela atual permanece indicada também ao abrir o cronômetro ou as configurações pelos atalhos do Início. Enquanto a largura ainda não estiver disponível, o aplicativo usa o menu inferior.
+
+Redimensionar a janela muda somente a disposição do menu: mantém a tela aberta, a sessão em andamento, os rascunhos, a página do Histórico e os filtros de Estatísticas, sem repetir consultas. O atalho de matéria abre o Cronômetro antes de consultar suas preferências; se você mudar de tela durante a consulta, sua conclusão não força um retorno ao Cronômetro. O esquema continua na versão 8, sem migração, dependências novas ou APK. Os 236 testes passaram, incluindo integração com controles Flet e bancos temporários, sem usar o banco pessoal. A etapa 0.25.0 permanece local, com conferência visual pendente.
+
+Para conferir no Windows, execute `main.py`, reduza e amplie a janela e percorra os sete destinos nas duas disposições. Na janela estreita, role o menu inferior até os últimos botões. Inicie uma sessão e redimensione durante a contagem; confira também que um campo ainda não salvo, a página do Histórico e um filtro personalizado permanecem preenchidos. Use os atalhos do Início para conferir a indicação da tela selecionada. Esse teste de largura no PC não substitui a validação física no Android, reservada ao marco combinado.
 
 ## Princípios de desenvolvimento
 

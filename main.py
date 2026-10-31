@@ -61,6 +61,7 @@ CUSTOM_STUDY_TYPE_KEY = "custom"
 MONTH_NAMES = ("Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
                "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro")
 THEME_LABELS = {"system": "Acompanhar o sistema", "light": "Claro", "dark": "Escuro"}
+NAVIGATION_BREAKPOINT = 800
 
 
 def resolve_study_type(choice: str | None, custom_name: str | None) -> str:
@@ -386,8 +387,9 @@ async def main(page: ft.Page) -> None:
                     message.value = "Retome ou finalize a sessão ativa antes de trocar de matéria."
             else:
                 subject_choice.value = subject_id
-                await choose_subject(event)
             show_timer(event)
+            if session is None:
+                await choose_subject(event)
 
         return ft.TextButton(name, on_click=open_subject)
 
@@ -698,6 +700,7 @@ async def main(page: ft.Page) -> None:
         history_locked = locked or history_loading or delete_dialog is not None
         timing_editable = editing_session is None or editing_session.source == "manual"
         history_nav_button.disabled = history_loading or manual_saving or delete_dialog is not None
+        navigation_rail.destinations[3].disabled = history_nav_button.disabled
         if delete_dialog:
             delete_dialog.actions[0].disabled = delete_busy
             delete_dialog.actions[1].disabled = locked or delete_busy
@@ -2052,49 +2055,49 @@ async def main(page: ft.Page) -> None:
         horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
     )
 
+    def select_panel(index: int) -> None:
+        """Troca a tela sem recriar os controles ou descartar seu preenchimento."""
+        nonlocal selected_panel
+        selected_panel = index
+        for position, panel in enumerate(panels):
+            panel.visible = position == index
+        sync_navigation()
+
+    def sync_navigation() -> None:
+        navigation_rail.selected_index = selected_panel
+        for index, button in enumerate(navigation_buttons):
+            selected = index == selected_panel
+            button.style = selected_navigation_style if selected else None
+            button.tooltip = f"{button.content} — tela atual" if selected else button.content
+
     def show_subjects(event) -> None:
-        statistics_panel.visible = False
-        history_panel.visible = settings_panel.visible = calendar_panel.visible = False
-        home_panel.visible, subjects_panel.visible, timer_panel.visible = False, True, False
+        select_panel(1)
         page.update()
 
     def show_timer(event) -> None:
-        statistics_panel.visible = False
-        history_panel.visible = settings_panel.visible = calendar_panel.visible = False
-        home_panel.visible, subjects_panel.visible, timer_panel.visible = False, False, True
+        select_panel(2)
         page.update()
 
     async def show_home(event) -> None:
-        statistics_panel.visible = False
-        history_panel.visible = settings_panel.visible = calendar_panel.visible = False
-        home_panel.visible, subjects_panel.visible, timer_panel.visible = True, False, False
+        select_panel(0)
         await refresh_streak_summary(event)
         render()
 
     async def show_history(event) -> None:
-        statistics_panel.visible = False
-        settings_panel.visible = calendar_panel.visible = False
-        home_panel.visible = subjects_panel.visible = timer_panel.visible = False
-        history_panel.visible = True
+        select_panel(3)
         if manual_open:
             render()
         else:
             await load_history()
 
     async def show_settings(event) -> None:
-        statistics_panel.visible = False
-        calendar_panel.visible = False
-        home_panel.visible = subjects_panel.visible = timer_panel.visible = history_panel.visible = False
-        settings_panel.visible = True
+        select_panel(4)
         open_goal_editor()
         await refresh_theme(event)
         render()
 
     async def show_calendar(event) -> None:
-        statistics_panel.visible = False
-        home_panel.visible = subjects_panel.visible = timer_panel.visible = False
-        history_panel.visible = settings_panel.visible = False
-        calendar_panel.visible = True
+        select_panel(5)
         if not plan_date.value and today:
             plan_date.value = today.strftime("%d/%m/%Y")
         await refresh_month(event)
@@ -2102,9 +2105,7 @@ async def main(page: ft.Page) -> None:
 
     async def show_statistics(event) -> None:
         nonlocal statistics_fields_initialized
-        home_panel.visible = subjects_panel.visible = timer_panel.visible = False
-        history_panel.visible = settings_panel.visible = calendar_panel.visible = False
-        statistics_panel.visible = True
+        select_panel(6)
         if not statistics_fields_initialized and today:
             statistics_start.value = today.replace(day=1).strftime("%d/%m/%Y")
             statistics_end.value = today.strftime("%d/%m/%Y")
@@ -2112,26 +2113,68 @@ async def main(page: ft.Page) -> None:
         await refresh_statistics(event)
         render()
 
-    history_nav_button = ft.TextButton("Histórico", on_click=show_history)
+    panels = (home_panel, subjects_panel, timer_panel, history_panel, settings_panel,
+              calendar_panel, statistics_panel)
+    selected_panel = 0
+    destinations = (
+        ("Início", ft.Icons.HOME_OUTLINED, show_home),
+        ("Matérias", ft.Icons.MENU_BOOK_OUTLINED, show_subjects),
+        ("Cronômetro", ft.Icons.TIMER_OUTLINED, show_timer),
+        ("Histórico", ft.Icons.HISTORY, show_history),
+        ("Configurações", ft.Icons.SETTINGS_OUTLINED, show_settings),
+        ("Calendário", ft.Icons.CALENDAR_MONTH_OUTLINED, show_calendar),
+        ("Estatísticas", ft.Icons.BAR_CHART, show_statistics),
+    )
+    selected_navigation_style = ft.ButtonStyle(
+        bgcolor=ft.Colors.SECONDARY_CONTAINER, color=ft.Colors.ON_SECONDARY_CONTAINER,
+        text_style=ft.TextStyle(weight=ft.FontWeight.BOLD),
+    )
+    navigation_buttons = [ft.TextButton(label, icon=icon, on_click=handler)
+                          for label, icon, handler in destinations]
+    history_nav_button = navigation_buttons[3]
 
+    async def change_destination(event) -> None:
+        index = event.control.selected_index
+        if (not isinstance(index, int) or not 0 <= index < len(panels)
+                or navigation_rail.destinations[index].disabled):
+            sync_navigation()
+            page.update()
+            return
+        result = destinations[index][2](event)
+        if asyncio.iscoroutine(result):
+            await result
+
+    wide_navigation = page.width is not None and page.width >= NAVIGATION_BREAKPOINT
+    navigation_rail = ft.NavigationRail(
+        destinations=[ft.NavigationRailDestination(icon=icon, label=label)
+                      for label, icon, _ in destinations],
+        selected_index=0, extended=True, label_type=ft.NavigationRailLabelType.NONE,
+        min_extended_width=200, scrollable=True, visible=wide_navigation,
+        on_change=change_destination,
+    )
+    navigation_divider = ft.VerticalDivider(width=1, visible=wide_navigation)
+    bottom_navigation = ft.Row(navigation_buttons, scroll=ft.ScrollMode.ALWAYS,
+                               visible=not wide_navigation)
+
+    def resize_navigation(event=None) -> None:
+        wide = page.width is not None and page.width >= NAVIGATION_BREAKPOINT
+        if navigation_rail.visible == wide:
+            return
+        navigation_rail.visible = navigation_divider.visible = wide
+        bottom_navigation.visible = not wide
+        if connected and page.app_visible:
+            page.update()
+
+    page.on_resize = resize_navigation
+    sync_navigation()
+    content = ft.Column([ft.Text("Streakly", size=28), message, *panels], expand=True,
+                        horizontal_alignment=ft.CrossAxisAlignment.STRETCH)
     page.add(ft.SafeArea(
-        content=ft.Column(
-            [
-                ft.Text("Streakly", size=28),
-                ft.Row([
-                    ft.TextButton("Início", on_click=show_home),
-                    ft.TextButton("Matérias", on_click=show_subjects),
-                    ft.TextButton("Cronômetro", on_click=show_timer),
-                    history_nav_button,
-                    ft.TextButton("Configurações", on_click=show_settings),
-                    ft.TextButton("Calendário", on_click=show_calendar),
-                    ft.TextButton("Estatísticas", on_click=show_statistics),
-                ], wrap=True),
-                message, home_panel, subjects_panel, timer_panel, history_panel, settings_panel, calendar_panel,
-                statistics_panel,
-            ],
-            expand=True, horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
-        ),
+        content=ft.Column([
+            ft.Row([navigation_rail, navigation_divider, content], expand=True,
+                   vertical_alignment=ft.CrossAxisAlignment.STRETCH),
+            bottom_navigation,
+        ], expand=True, horizontal_alignment=ft.CrossAxisAlignment.STRETCH),
         expand=True,
     ))
     render()
