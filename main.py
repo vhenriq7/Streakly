@@ -1,4 +1,5 @@
 import asyncio
+import calendar
 import sqlite3
 from datetime import UTC, date, datetime, timedelta
 from math import ceil
@@ -12,9 +13,11 @@ from notifications import (
     windows_notifications_available,
 )
 from storage import (
+    CalendarDay,
     DailyGoalOverride,
     DailyPlan,
     DefaultDailyGoal,
+    MonthlyCalendar,
     StreakBase,
     add_subject,
     create_manual_session,
@@ -28,6 +31,7 @@ from storage import (
     pause_session,
     read_session_history,
     read_daily_plan,
+    read_monthly_calendar,
     read_study_overview,
     read_subject_deletion_preview,
     rename_subject,
@@ -50,6 +54,8 @@ POMODORO_PRESETS = {"25/5": (25 * 60, 5 * 60), "50/10": (50 * 60, 10 * 60)}
 HISTORY_PAGE_SIZE = 25
 STUDY_TYPES = ("Leitura", "Aula", "Exercícios", "Revisão")
 CUSTOM_STUDY_TYPE_KEY = "custom"
+MONTH_NAMES = ("Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+               "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro")
 
 
 def resolve_study_type(choice: str | None, custom_name: str | None) -> str:
@@ -151,6 +157,10 @@ async def main(page: ft.Page) -> None:
     date_original_seconds: int | None = None
     streak_base: StreakBase | None = None
     streak_zone_key: tuple[date, str | None, timedelta | None] | None = None
+    month_data: MonthlyCalendar | None = None
+    month_dirty = True
+    month_loading = False
+    month_request: object | None = None
     history_offset = 0
     history_has_more = False
     history_loaded = False
@@ -203,6 +213,10 @@ async def main(page: ft.Page) -> None:
     )
     plan_duration = ft.TextField(label="Meta da data (HH:MM)", hint_text="Ex.: 02:00")
     plan_message = ft.Text()
+    month_title = ft.Text("Calendário mensal", size=20)
+    month_status = ft.Text("O mês ainda não foi consultado.")
+    month_error = ft.Text()
+    month_grid = ft.Column(spacing=4)
     home_session = ft.Text()
     home_subjects = ft.ListView(
         controls=[ft.Text("Nenhuma matéria cadastrada ainda.")],
@@ -364,10 +378,14 @@ async def main(page: ft.Page) -> None:
         nonlocal session, subject_options, settings_subject, ready, today, today_seconds
         nonlocal subject_selection_removed, recorded_study_types, daily_goal, today_override
         nonlocal streak_base, streak_zone_key
+        nonlocal month_dirty
         previous = session
         moment = datetime.now(UTC)
         local_moment = moment.astimezone()
         zone_key = (local_moment.date(), local_moment.tzname(), local_moment.utcoffset())
+        zone_changed = streak_zone_key is not None and streak_zone_key != zone_key
+        if zone_changed:
+            month_dirty = True
         need_streak = reload_streak or streak_base is None or streak_zone_key != zone_key
         if need_streak:
             streak_base = None
@@ -440,6 +458,9 @@ async def main(page: ft.Page) -> None:
                     message.value = f"Foco concluído. Inicie a {label} quando quiser."
                 else:
                     message.value = "Pausa concluída. Inicie o próximo foco quando quiser."
+        if calendar_panel.visible and month_dirty and (reload_streak or zone_changed):
+            await read_month_view(month_data.year if month_data else today.year,
+                                  month_data.month if month_data else today.month)
 
     def render() -> None:
         active = session is not None
@@ -556,6 +577,22 @@ async def main(page: ft.Page) -> None:
         plan_cancel_button.disabled = date_saving or delete_busy
         plan_date.error_text = ("A data foi alterada. Consulte a data informada antes de salvar."
                                 if date_editing and not date_matches else None)
+        month_locked = locked or month_loading or delete_dialog is not None
+        month_previous_button.disabled = month_locked or month_data is None or (month_data.year, month_data.month) == (1, 1)
+        month_next_button.disabled = month_locked or month_data is None or (month_data.year, month_data.month) == (9999, 12)
+        month_current_button.disabled = month_refresh_button.disabled = month_locked
+        if month_loading:
+            month_status.value = "Carregando mês…"
+        elif month_data is None:
+            month_status.value = "O mês ainda não foi consultado. Use Mês atual ou Atualizar mês."
+        elif month_dirty:
+            month_status.value = "Os dados do mês precisam de atualização. Use Atualizar mês."
+        else:
+            month_status.value = "Mês consultado. Use Atualizar mês para ver o tempo e alterações mais recentes."
+        for row in month_grid.controls:
+            for cell in row.controls:
+                if isinstance(cell, ft.Button):
+                    cell.disabled = month_locked
         history_locked = locked or history_loading or delete_dialog is not None
         timing_editable = editing_session is None or editing_session.source == "manual"
         history_nav_button.disabled = history_loading or manual_saving or delete_dialog is not None
@@ -667,9 +704,125 @@ async def main(page: ft.Page) -> None:
             page.update()
 
     def invalidate_streak_cache() -> None:
-        nonlocal streak_base, streak_zone_key
+        nonlocal streak_base, streak_zone_key, month_dirty
         streak_base = None
         streak_zone_key = None
+        month_dirty = True
+
+    def month_day_button(item: CalendarDay, displayed: MonthlyCalendar) -> ft.Button:
+        target = item.plan.effective_seconds
+        if item.plan.is_rest_day:
+            status, background = "Descanso", ft.Colors.BLUE_900
+        elif item.day > displayed.today:
+            status, background = ("Planejado" if target is not None else "Sem meta"), ft.Colors.GREY_800
+        elif target is not None and item.study_seconds >= target:
+            status, background = "Meta atingida", ft.Colors.GREEN_900
+        elif target is not None:
+            status = "Em andamento" if item.day == displayed.today else "Abaixo da meta"
+            background = ft.Colors.GREY_800 if item.day == displayed.today else ft.Colors.ORANGE_900
+        else:
+            status, background = ("Estudado" if item.study_seconds else "Sem meta"), ft.Colors.GREY_800
+
+        async def select_day(event) -> None:
+            if (busy or not ready or not connected or not calendar_panel.visible
+                    or month_data is not displayed or delete_dialog is not None):
+                return
+            if date_editing:
+                if date_plan is not None and date_plan.day == item.day:
+                    return
+                plan_message.value = "Cancele o planejamento em edição antes de abrir outro dia."
+                render()
+                return
+            plan_date.value = item.day.strftime("%d/%m/%Y")
+            await query_date_plan()
+
+        goal_text = format_duration(target) if target is not None else "sem meta"
+        day_label = f"{item.day.day} *" if item.day == displayed.today else str(item.day.day)
+        return ft.Button(
+            content=ft.Column(
+                [ft.Text(day_label, size=13, weight=ft.FontWeight.BOLD),
+                 ft.Text(status, size=10, max_lines=2, text_align=ft.TextAlign.CENTER),
+                 ft.Text(format_duration(item.study_seconds), size=10, max_lines=1)],
+                spacing=2, tight=True, horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            data=item.day.isoformat(), expand=1, height=86, on_click=select_day,
+            tooltip=f"{item.day:%d/%m/%Y} · {status}. Estudo: {format_duration(item.study_seconds)}. Meta: {goal_text}.",
+            style=ft.ButtonStyle(
+                padding=3, bgcolor=background, color=ft.Colors.WHITE,
+                shape=ft.RoundedRectangleBorder(radius=6),
+                side=ft.BorderSide(width=2 if item.day == displayed.today else 0,
+                                   color=ft.Colors.PRIMARY),
+            ),
+        )
+
+    def install_month(result: MonthlyCalendar) -> None:
+        nonlocal month_data, month_dirty
+        rows = []
+        for week in calendar.Calendar(firstweekday=calendar.MONDAY).monthdayscalendar(result.year, result.month):
+            rows.append(ft.Row(
+                [month_day_button(result.days[number - 1], result) if number else ft.Container(expand=1, height=86)
+                 for number in week], spacing=4,
+            ))
+        month_grid.controls = rows
+        month_data, month_dirty = result, False
+        month_title.value = f"{MONTH_NAMES[result.month - 1]} de {result.year}"
+        month_error.value = ""
+
+    async def read_month_view(year: int, month: int) -> None:
+        nonlocal month_request, month_loading
+        request = object()
+        month_request = request
+        month_loading = True
+        render()
+        try:
+            result = await asyncio.to_thread(read_monthly_calendar, year, month, at=datetime.now(UTC))
+            if month_request is request and connected:
+                install_month(result)
+        except (sqlite3.Error, OSError, ValueError):
+            if month_request is request:
+                month_error.value = "Não foi possível carregar o mês. A visualização anterior foi mantida. Tente Atualizar mês."
+        finally:
+            if month_request is request:
+                month_request = None
+            month_loading = False
+            render()
+
+    async def load_month(year: int, month: int) -> None:
+        nonlocal busy
+        if (busy or not ready or month_loading or delete_dialog is not None
+                or not 1 <= year <= 9999 or not 1 <= month <= 12):
+            return
+        busy = True
+        render()
+        async with state_lock:
+            try:
+                await read_month_view(year, month)
+            finally:
+                busy = False
+                render()
+
+    async def change_month(offset: int) -> None:
+        if month_data is None:
+            return
+        index = month_data.year * 12 + month_data.month - 1 + offset
+        year, month = divmod(index, 12)
+        await load_month(year, month + 1)
+
+    async def previous_month(event) -> None:
+        await change_month(-1)
+
+    async def next_month(event) -> None:
+        await change_month(1)
+
+    async def current_month(event) -> None:
+        if today:
+            await load_month(today.year, today.month)
+
+    async def refresh_month(event) -> None:
+        if month_data:
+            await load_month(month_data.year, month_data.month)
+        else:
+            await current_month(event)
 
     async def refresh_streak_summary(event=None) -> None:
         nonlocal busy, ready
@@ -736,6 +889,8 @@ async def main(page: ft.Page) -> None:
             date_plan = result
             plan_date.value = selected_day.strftime("%d/%m/%Y")
             fill_date_editor()
+            if month_data is None or (month_data.year, month_data.month) != (selected_day.year, selected_day.month):
+                await load_month(selected_day.year, selected_day.month)
 
     def cancel_date_editor(event) -> None:
         nonlocal date_editing, date_request
@@ -1450,6 +1605,10 @@ async def main(page: ft.Page) -> None:
     plan_edit_button = ft.TextButton("Editar planejamento", on_click=fill_date_editor)
     plan_save_button = ft.Button("Salvar planejamento", on_click=save_date_plan)
     plan_cancel_button = ft.TextButton("Cancelar planejamento", on_click=cancel_date_editor)
+    month_previous_button = ft.TextButton("Mês anterior", on_click=previous_month)
+    month_next_button = ft.TextButton("Próximo mês", on_click=next_month)
+    month_current_button = ft.TextButton("Mês atual", on_click=current_month)
+    month_refresh_button = ft.TextButton("Atualizar mês", on_click=refresh_month)
     for field in (manual_date, manual_time, manual_duration):
         field.on_change = preview_manual_end
     subject_choice.on_select = choose_subject
@@ -1531,7 +1690,14 @@ async def main(page: ft.Page) -> None:
         visible=False, horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
     )
     calendar_panel = ft.Column(
-        [ft.Text("Calendário", size=20), ft.Row([plan_date, plan_query_button], wrap=True),
+        [ft.Text("Calendário", size=20), month_title,
+         ft.Row([month_previous_button, month_next_button, month_current_button, month_refresh_button], wrap=True),
+         month_status, month_error,
+         ft.Row([ft.Container(ft.Text(name, size=11, text_align=ft.TextAlign.CENTER), expand=1)
+                 for name in ("Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom")], spacing=4),
+         month_grid,
+         ft.Text("* Hoje · Verde: meta atingida · Laranja: abaixo da meta · Azul: descanso · Cinza: pendente, sem meta ou futuro.", size=12),
+         ft.Row([plan_date, plan_query_button], wrap=True),
          plan_status, plan_message, plan_edit_button, plan_form],
         expand=True, visible=False, scroll=ft.ScrollMode.AUTO,
         horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
@@ -1575,10 +1741,8 @@ async def main(page: ft.Page) -> None:
         calendar_panel.visible = True
         if not plan_date.value and today:
             plan_date.value = today.strftime("%d/%m/%Y")
-        if date_plan is None and not date_editing:
-            await query_date_plan()
-        else:
-            render()
+        await refresh_month(event)
+        render()
 
     history_nav_button = ft.TextButton("Histórico", on_click=show_history)
 
@@ -1602,6 +1766,8 @@ async def main(page: ft.Page) -> None:
     ))
     render()
 
+    busy = True
+    render()
     try:
         await asyncio.to_thread(initialize_database)
         await refresh_state(reload_study_types=True, reload_streak=True)
@@ -1613,6 +1779,9 @@ async def main(page: ft.Page) -> None:
         message.value = "Não foi possível abrir o banco local. Verifique o acesso à pasta de dados."
         render()
         return
+    finally:
+        busy = False
+        render()
     if session:
         if not session.pomodoro or session.pomodoro.state != "ready":
             message.value = "Sessão recuperada com os horários salvos."
@@ -1646,10 +1815,11 @@ async def main(page: ft.Page) -> None:
             ticker = page.run_task(update_timer)
 
     def stop_updates(event=None) -> None:
-        nonlocal connected, delete_dialog, subject_delete_request, date_request
+        nonlocal connected, delete_dialog, subject_delete_request, date_request, month_request
         connected = False
         subject_delete_request = None
         date_request = None
+        month_request = None
         if delete_dialog:
             delete_dialog.open = False
             delete_dialog = None

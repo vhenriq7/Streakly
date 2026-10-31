@@ -2,7 +2,7 @@
 
 Aplicativo pessoal de acompanhamento de estudos para **Windows e Android**, com registro de tempo, Pomodoro, metas diárias, ofensivas (streaks), calendário e estatísticas. Projeto **offline-first**: os dados são gravados localmente e sincronizados com a nuvem quando houver conexão.
 
-> **Status:** início do MVP offline. A versão 0.16.0 acrescenta ofensiva atual e recorde no Início, usando as metas e os dias de descanso registrados. Os 170 testes automatizados e a integração com controles Flet passaram; falta conferir os indicadores na janela do Windows. As provas de conceito anteriores validaram persistência no Windows/Android, cronômetro progressivo no Windows e exibição do aviso de foco concluído no Windows, este confirmado pelo usuário em 28/10/2026. Avisos Android e com o app fechado seguem pendentes, nos marcos combinados.
+> **Status:** início do MVP offline. A versão 0.17.0 acrescenta a grade mensal do Calendário, com tempo estudado, metas e descanso por dia. Os 186 testes automatizados e a integração com controles Flet passaram; falta conferir a grade na janela do Windows. As provas de conceito anteriores validaram persistência no Windows/Android, cronômetro progressivo no Windows e exibição do aviso de foco concluído no Windows, este confirmado pelo usuário em 28/10/2026. Avisos Android e com o app fechado seguem pendentes, nos marcos combinados.
 
 ## Funcionalidades planejadas
 
@@ -213,13 +213,13 @@ Em **Configurações**, defina uma duração positiva em **HH:MM**, como 03:00 p
 
 Conforme escolha do usuário em **29/10/2026**, uma mudança vale a partir de hoje e mantém as metas dos dias anteriores, inclusive quando o app ficou fechado. Navegar entre telas preserva o rascunho; cancelar não grava. Se o dia mudar ou outra instância alterar a meta durante a edição, cancele e reabra o formulário para conferir a configuração atual. Erros anteriores à gravação mantêm o preenchimento; erros posteriores informam que a meta já foi salva.
 
-O esquema 6 acrescenta o histórico de vigência da meta, sem modificar sessões ou eventos existentes. Os 134 testes automatizados e a integração com controles Flet passaram, usando bancos temporários. Para conferir no Windows, salve uma meta, veja o progresso no Início e reabra o app para confirmar a persistência. Falta essa conferência na janela nativa. Metas específicas por data e descanso foram acrescentados na 0.15.0 e ofensivas na 0.16.0; a grade visual do calendário fica para uma próxima etapa. Não há dependências novas nem APK nesta etapa.
+O esquema 6 acrescenta o histórico de vigência da meta, sem modificar sessões ou eventos existentes. Os 134 testes automatizados e a integração com controles Flet passaram, usando bancos temporários. Para conferir no Windows, salve uma meta, veja o progresso no Início e reabra o app para confirmar a persistência. Falta essa conferência na janela nativa. Metas específicas por data e descanso foram acrescentados na 0.15.0, ofensivas na 0.16.0 e a grade mensal na 0.17.0. Não há dependências novas nem APK nesta etapa.
 
 ### Metas por data e descanso — versão 0.15.0
 
 Em **Calendário**, informe uma data como **DD/MM/AAAA** e use **Consultar data**. Escolha entre usar a meta padrão vigente naquele dia, definir uma meta específica positiva em **HH:MM** ou marcar descanso. A configuração pode ser feita explicitamente para uma data passada ou futura e vale somente nela, sem alterar a vigência da meta padrão. Voltar a **Usar meta padrão** remove a exceção após confirmação; **Cancelar planejamento** não grava.
 
-O **Início** usa a exceção de hoje quando houver uma. Em descanso, mostra essa indicação sem barra de meta; qualquer estudo realizado continua no total diário e no Histórico. **Configurações** mantém separada a meta padrão vigente. O cálculo de ofensivas foi acrescentado na 0.16.0; a grade visual do calendário permanece para depois.
+O **Início** usa a exceção de hoje quando houver uma. Em descanso, mostra essa indicação sem barra de meta; qualquer estudo realizado continua no total diário e no Histórico. **Configurações** mantém separada a meta padrão vigente. O cálculo de ofensivas foi acrescentado na 0.16.0 e a grade mensal na 0.17.0.
 
 Mudar a data digitada exige consultar novamente antes de salvar. Navegar preserva o rascunho; alterações concorrentes são recusadas e falhas após gravar informam que a configuração já foi salva. O esquema 7 acrescenta as exceções por data, preservando metas padrão e estudos existentes. Os 151 testes automatizados e a integração com controles Flet passaram, usando bancos temporários. Para conferir no Windows, configure uma exceção para hoje, veja o Início, experimente Cancelar e reabra o app. Falta essa conferência na janela nativa; não há dependências novas nem APK.
 
@@ -229,7 +229,15 @@ O **Início** mostra a ofensiva atual com uma chama e seu recorde. Cada dia em q
 
 O cálculo usa o tempo efetivo dos eventos, repartido pelo dia local, e respeita pausas e o limite de foco Pomodoro. Corrigir ou excluir estudos e alterar o planejamento de uma data recalcula a ofensiva e o recorde, sem gravar um contador separado. A atualização ocorre na abertura, ao entrar em Início, após gravações e ao detectar mudança de dia ou fuso. Use **Atualizar ofensiva** para incorporar alterações feitas em outra instância ou uma mudança de fuso ainda não detectada; reabrir o app também refaz o cálculo.
 
-O esquema permanece na versão 7, sem dependências novas ou APK. Os 170 testes automatizados e a integração com controles Flet passaram, usando bancos temporários. Para conferir no Windows, veja o Início antes e depois de atingir a meta de hoje, consulte um dia de descanso e reabra o app. Falta essa conferência na janela nativa. A grade mensal e as estatísticas completas ficam para as próximas etapas.
+O esquema permanece na versão 7, sem dependências novas ou APK. Os 170 testes automatizados e a integração com controles Flet passaram, usando bancos temporários. Para conferir no Windows, veja o Início antes e depois de atingir a meta de hoje, consulte um dia de descanso e reabra o app. Falta essa conferência na janela nativa. A grade mensal foi acrescentada na 0.17.0; as estatísticas completas ficam para uma próxima etapa.
+
+### Calendário mensal — versão 0.17.0
+
+Em **Calendário**, a grade de segunda a domingo mostra o tempo estudado e a situação de cada dia. Navegue entre os meses ou use **Mês atual** e **Atualizar mês**. Textos, cores e detalhes dos dias distinguem meta atingida, dia encerrado abaixo da meta, hoje em andamento, descanso, ausência de meta e planejamento futuro. Datas futuras não são tratadas como metas descumpridas.
+
+A primeira abertura carrega o mês sem abrir o editor. Clicar em um dia consulta seu planejamento, sem gravar. Navegar entre meses preserva o formulário e a data em edição; clicar novamente no mesmo dia mantém o rascunho. Para selecionar outro dia enquanto edita, use primeiro **Cancelar planejamento**. A consulta digitada por data continua disponível.
+
+A grade representa a consulta mensal mais recente. Ela é carregada ao abrir, navegar ou atualizar o mês, e gravações atualizam o mês visível. Use Atualizar mês ou reabra Calendário para incorporar tempo recente e alterações de outra instância. Falhas mantêm a grade e o mês anteriores com aviso. Os 186 testes automatizados e a integração com controles Flet passaram, usando bancos temporários, incluindo navegação, rascunhos, falhas de leitura e gravação de meta em data limite. Para conferir no Windows, navegue entre meses, selecione um dia e confirme que cancelar preserva seus dados. Falta essa conferência na janela nativa. O esquema permanece na versão 7, sem dependências novas ou APK; as estatísticas completas ficam para depois.
 
 ## Princípios de desenvolvimento
 

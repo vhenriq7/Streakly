@@ -2,6 +2,7 @@
 
 import os
 import sqlite3
+from calendar import monthrange
 from collections.abc import Iterator
 from contextlib import closing, contextmanager
 from dataclasses import dataclass, replace
@@ -56,6 +57,21 @@ class DailyPlan:
         if self.override is not None:
             return self.override.duration_seconds
         return self.default_goal.duration_seconds if self.default_goal else None
+
+
+@dataclass(frozen=True)
+class CalendarDay:
+    day: date
+    study_seconds: float
+    plan: DailyPlan
+
+
+@dataclass(frozen=True)
+class MonthlyCalendar:
+    year: int
+    month: int
+    today: date
+    days: tuple[CalendarDay, ...]
 
 
 @dataclass(frozen=True)
@@ -649,6 +665,79 @@ def read_session_history(*, limit: int = 25, offset: int = 0) -> HistoryPage:
         )
 
 
+def read_monthly_calendar(
+    year: int, month: int, *, at: datetime | None = None, tz: tzinfo | None = None,
+) -> MonthlyCalendar:
+    """Consulta estudos e planejamento do mês em uma única visão, sem gravações."""
+    if type(year) is not int or not 1 <= year <= 9999 or type(month) is not int or not 1 <= month <= 12:
+        raise ValueError("Informe um ano e um mês válidos para consultar o calendário.")
+    moment = as_utc(at if at is not None else datetime.now(UTC))
+    today = moment.astimezone(tz).date()
+    first = date(year, month, 1)
+    last = date(year, month, monthrange(year, month)[1])
+    with _connection() as connection:
+        defaults = connection.execute(
+            "SELECT id, effective_from, duration_seconds FROM daily_goal_defaults "
+            "WHERE effective_from <= ? ORDER BY effective_from", (last.isoformat(),),
+        ).fetchall()
+        overrides = connection.execute(
+            "SELECT id, day, duration_seconds, is_rest_day FROM daily_goal_overrides "
+            "WHERE day >= ? AND day <= ? ORDER BY day", (first.isoformat(), last.isoformat()),
+        ).fetchall()
+        totals: dict[date, timedelta] = {}
+        # Meses futuros têm planejamento, mas nenhum tempo estudado até agora.
+        if first <= today:
+            # O deslocamento de um fuso é menor que um dia. Esta margem UTC
+            # seleciona candidatos sem converter datas antigas pelo Windows;
+            # os dias locais exatos são calculados somente para seus intervalos.
+            first_utc = datetime.combine(first, datetime.min.time(), tzinfo=UTC)
+            start = first_utc - timedelta(days=1) if first > date.min else first_utc
+            if last == date.max:
+                end = datetime.max.replace(tzinfo=UTC)
+            else:
+                following = date(year + month // 12, month % 12 + 1, 1)
+                following_utc = datetime.combine(following, datetime.min.time(), tzinfo=UTC)
+                end = following_utc + timedelta(days=1)
+            end = min(end, moment)
+            if start < end:
+                candidates = connection.execute(
+                    """
+                    SELECT id FROM sessions
+                    WHERE started_at < ? AND (ended_at IS NULL OR ended_at > ?)
+                    ORDER BY started_at, id
+                    """,
+                    (end.isoformat(), start.isoformat()),
+                ).fetchall()
+                for row in candidates:
+                    session = _read_session(connection, row["id"])
+                    for study_day, seconds in session_study_seconds_by_day(
+                        session, start, end, moment, tz,
+                    ).items():
+                        if study_day.year == year and study_day.month == month:
+                            totals[study_day] = totals.get(study_day, timedelta()) + timedelta(seconds=seconds)
+        periods = [DefaultDailyGoal(row["id"], date.fromisoformat(row["effective_from"]), row["duration_seconds"])
+                   for row in defaults]
+        by_day = {
+            date.fromisoformat(row["day"]): DailyGoalOverride(
+                row["id"], date.fromisoformat(row["day"]), row["duration_seconds"], bool(row["is_rest_day"]),
+            )
+            for row in overrides
+        }
+        days = []
+        period_index = 0
+        current_default = None
+        for number in range(1, last.day + 1):
+            day = date(year, month, number)
+            while period_index < len(periods) and periods[period_index].effective_from <= day:
+                current_default = periods[period_index]
+                period_index += 1
+            days.append(CalendarDay(
+                day=day, study_seconds=totals.get(day, timedelta()).total_seconds(),
+                plan=DailyPlan(day, current_default, by_day.get(day)),
+            ))
+        return MonthlyCalendar(year, month, today, tuple(days))
+
+
 def _read_streak_base(
     connection: sqlite3.Connection, moment: datetime, tz: tzinfo | None,
     *, active: StudySession | None = None,
@@ -668,7 +757,10 @@ def _read_streak_base(
     if not first_dates:
         return StreakBase(day, 0, 0)
     first_day = min(first_dates)
-    first_start = datetime.combine(first_day, datetime.min.time(), tzinfo=tz).astimezone(UTC)
+    # A margem seleciona candidatos sem pedir ao SO uma conversão histórica;
+    # o rateio usa os dias locais reais e a avaliação começa em first_day.
+    first_utc = datetime.combine(first_day, datetime.min.time(), tzinfo=UTC)
+    first_start = first_utc - timedelta(days=1) if first_day > date.min else first_utc
     candidates = connection.execute(
         """
         SELECT id FROM sessions

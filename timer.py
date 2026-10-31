@@ -186,6 +186,18 @@ def local_day_window(
     """Converte as duas meias-noites locais em UTC, sem presumir um dia de 24h."""
     day = as_utc(now).astimezone(tz).date()
     # Sem tz explícito, astimezone interpreta cada meia-noite no fuso do SO.
-    start = datetime.combine(day, time.min, tzinfo=tz).astimezone(UTC)
-    end = datetime.combine(day + timedelta(days=1), time.min, tzinfo=tz).astimezone(UTC)
+    try:
+        start = datetime.combine(day, time.min, tzinfo=tz).astimezone(UTC)
+    except (OverflowError, OSError, ValueError):
+        if day != date.min:
+            raise
+        start = datetime.min.replace(tzinfo=UTC)
+    if day == date.max:
+        # A meia-noite seguinte pode estar fora do intervalo de datetime.
+        try:
+            end = datetime.combine(day, time.max, tzinfo=tz).astimezone(UTC) + timedelta(microseconds=1)
+        except (OverflowError, OSError, ValueError):
+            end = datetime.max.replace(tzinfo=UTC)
+    else:
+        end = datetime.combine(day + timedelta(days=1), time.min, tzinfo=tz).astimezone(UTC)
     return day, start, end
