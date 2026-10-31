@@ -816,14 +816,23 @@ async def main(page: ft.Page) -> None:
         if not result.subjects:
             return [ft.Text("Nenhum estudo neste período.")]
         labels = statistics_subject_labels(result)
+        largest_seconds = max(item.total_seconds for item in result.subjects)
         rows = []
         for item in result.subjects:
             label = labels[item.subject_id]
-            rows.append(ft.Row(
-                [ft.Text(label, expand=True,
-                         tooltip=f"Identificador da matéria: {item.subject_id}" if label != item.subject_name else None),
-                 ft.Text(format_duration(item.total_seconds))],
-                data=item.subject_id, spacing=12,
+            rows.append(ft.Column(
+                [ft.Row(
+                    [ft.Text(label, expand=True,
+                             tooltip=f"Identificador da matéria: {item.subject_id}" if label != item.subject_name else None),
+                     ft.Text(format_duration(item.total_seconds))], spacing=12,
+                 ),
+                 ft.ProgressBar(
+                     value=item.total_seconds / largest_seconds, bar_height=8,
+                     track_gap=0, stop_indicator_radius=0,
+                     semantics_label=f"Tempo de estudo de {label}: {format_duration(item.total_seconds)}. "
+                                     f"Referência: maior tempo no período, {format_duration(largest_seconds)}.",
+                 )],
+                data=item.subject_id, spacing=4, horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
             ))
         return rows
 
@@ -1915,6 +1924,7 @@ async def main(page: ft.Page) -> None:
                  "O estudo é contado somente até o instante da consulta."),
          statistics_stamp,
          ft.Text("Tempo por matéria", size=18), statistics_subjects,
+         ft.Text("As barras usam como referência a matéria com maior tempo no período.", size=12),
          ft.Text("Tempo por tipo de estudo", size=18), statistics_types,
          ft.Text("Tempo por assunto", size=18), statistics_topics],
         expand=True, visible=False, scroll=ft.ScrollMode.AUTO,
