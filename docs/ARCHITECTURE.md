@@ -187,6 +187,10 @@ Somente contribuições positivas entram na tupla. As somas e a ordenação usam
 
 As barras são montadas com as linhas apenas quando chega uma nova consulta válida, antes da substituição conjunta do modelo e das três listas. Filtros, rascunhos, cache, invalidação após commit e descarte de respostas tardias permanecem compartilhados; falhas mantêm os resultados anteriores e os ticks não consultam nem reconstroem as barras. A alteração fica na interface, sem consulta adicional, modelo de domínio novo, métrica, dependência, migração ou APK; o esquema permanece na versão 7. Outras visualizações ficam para etapas posteriores.
 
+**Comparação por tipo e assunto 0.23.0:** uma função de apresentação em `main.py` monta a linha e a `ft.ProgressBar` das três distribuições. Cada lista calcula seu próprio máximo a partir de `total_seconds`, preservando frações, e o fornece à função junto do rótulo, da identificação do item e da descrição acessível. O cabeçalho fica alinhado ao topo e a barra abaixo ocupa a largura comum. Legendas e descrições identificam a referência particular de cada lista. Assuntos mantêm o contexto da matéria, homônimas e a distinção entre `None` e texto literal.
+
+A montagem continua anterior à substituição conjunta das três listas e dos indicadores, apenas após consulta válida. Modelos, consultas, métricas, cache, tratamento de falhas e tick permanecem iguais; não há migração, dependência ou APK, e o esquema continua na versão 7.
+
 ## 6. Protocolo de sincronização
 
 1. Salvar alteração **em transação local**, junto com item na outbox.
@@ -255,6 +259,8 @@ O Android reutiliza `main.py`, `storage.py`, `timer.py` e `notifications.py`, co
 **Tempo por assunto 0.21.0:** os 222 testes passaram, incluindo agrupamento por matéria e assunto exato, homônimas, ausência de assunto, textos vazios legados, maiúsculas e Unicode, ordenação, precisão, modelos imutáveis, sessões ativas/Pomodoro, correções, exclusões, snapshot concorrente e reabertura em outro processo. A integração com controles Flet verificou rótulos de assunto e ausência, prefixos de matérias homônimas, múltiplos assuntos sem falso homônimo, filtros, períodos vazios, rascunhos, ausência de consulta ou reconstrução no tick, correções durante navegação preservando eventos, falhas de leitura e após commit, recuperação, renomeação, exclusão, respostas tardias e reabertura. Falta conferir a lista e os filtros na janela nativa do Windows. O esquema continua na versão 7, sem migração, dependências novas ou APK; os testes não usaram o banco pessoal.
 
 **Comparação visual por matéria 0.22.0:** os 222 testes de regressão passaram. A integração com controles Flet e banco temporário verificou proporções, empates, frações, homônimas, períodos vazios, filtros, descrições acessíveis, ausência de consulta ou reconstrução no tick, atualização após correções, preservação conjunta em falhas de leitura e após commit, recuperação, respostas tardias e reabertura. Falta conferir as barras e a navegação na janela nativa do Windows. Não houve novas consultas, migração, dependências ou APK; os testes não usaram o banco pessoal.
+
+**Comparação por tipo e assunto 0.23.0:** os 222 testes de regressão passaram. A integração com controles Flet e bancos temporários verificou as escalas independentes, proporções, empates, frações, largura comum, descrições acessíveis, contexto dos assuntos e ausência de preenchimento, filtros, períodos vazios, rascunhos, ausência de consulta ou reconstrução no tick, correções durante navegação, preservação dos eventos, falhas de leitura e após commit, recuperação, respostas tardias e reabertura. Falta conferir as três listas na janela nativa do Windows. Não houve alterações do banco pessoal, consultas adicionais, migração, novas dependências ou APK.
 
 Antes do MVP completo:
 

@@ -811,6 +811,29 @@ async def main(page: ft.Page) -> None:
             labels[item.subject_id] = label
         return labels
 
+    def statistics_comparison_row(
+        name: ft.Text, seconds: float, largest_seconds: float, category: str,
+        *, data: object, caption: ft.Text | None = None,
+    ) -> ft.Column:
+        """Compartilha o desenho das barras, preservando o contexto de cada lista."""
+        name.expand = True
+        controls: list[ft.Control] = [ft.Row(
+            [name, ft.Text(format_duration(seconds))], spacing=12,
+            vertical_alignment=ft.CrossAxisAlignment.START,
+        )]
+        context = name.value
+        if caption is not None:
+            controls.append(caption)
+            context += f". Matéria: {caption.value}"
+        controls.append(ft.ProgressBar(
+            value=seconds / largest_seconds, bar_height=8,
+            track_gap=0, stop_indicator_radius=0,
+            semantics_label=f"{context}. Tempo de estudo: {format_duration(seconds)}. "
+                            f"Referência: maior tempo por {category} no período, {format_duration(largest_seconds)}.",
+        ))
+        return ft.Column(controls, data=data, spacing=4,
+                         horizontal_alignment=ft.CrossAxisAlignment.STRETCH)
+
     def statistics_subject_rows(result: PeriodStatistics) -> list[ft.Control]:
         """Monta a lista apenas quando chega uma nova consulta do período."""
         if not result.subjects:
@@ -820,44 +843,34 @@ async def main(page: ft.Page) -> None:
         rows = []
         for item in result.subjects:
             label = labels[item.subject_id]
-            rows.append(ft.Column(
-                [ft.Row(
-                    [ft.Text(label, expand=True,
-                             tooltip=f"Identificador da matéria: {item.subject_id}" if label != item.subject_name else None),
-                     ft.Text(format_duration(item.total_seconds))], spacing=12,
-                 ),
-                 ft.ProgressBar(
-                     value=item.total_seconds / largest_seconds, bar_height=8,
-                     track_gap=0, stop_indicator_radius=0,
-                     semantics_label=f"Tempo de estudo de {label}: {format_duration(item.total_seconds)}. "
-                                     f"Referência: maior tempo no período, {format_duration(largest_seconds)}.",
-                 )],
-                data=item.subject_id, spacing=4, horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+            rows.append(statistics_comparison_row(
+                ft.Text(label, tooltip=f"Identificador da matéria: {item.subject_id}"
+                        if label != item.subject_name else None),
+                item.total_seconds, largest_seconds, "matéria", data=item.subject_id,
             ))
         return rows
 
     def statistics_type_rows(result: PeriodStatistics) -> list[ft.Control]:
         if not result.study_types:
             return [ft.Text("Nenhum estudo neste período.")]
-        return [ft.Row(
-            [ft.Text(item.study_type, expand=True), ft.Text(format_duration(item.total_seconds))],
-            data=item.study_type, spacing=12,
+        largest_seconds = max(item.total_seconds for item in result.study_types)
+        return [statistics_comparison_row(
+            ft.Text(item.study_type), item.total_seconds, largest_seconds, "tipo de estudo",
+            data=item.study_type,
         ) for item in result.study_types]
 
     def statistics_topic_rows(result: PeriodStatistics) -> list[ft.Control]:
         if not result.topics:
             return [ft.Text("Nenhum estudo neste período.")]
         labels = statistics_subject_labels(result)
-        return [ft.Row(
-            [ft.Column(
-                [ft.Text(f"Assunto: {item.topic}" if item.topic is not None else "Sem assunto informado",
-                         italic=item.topic is None),
-                 ft.Text(labels[item.subject_id], size=12,
-                         tooltip=f"Identificador da matéria: {item.subject_id}"
-                         if labels[item.subject_id] != item.subject_name else None)],
-                spacing=2, expand=True,
-            ), ft.Text(format_duration(item.total_seconds))],
-            data=(item.subject_id, item.topic), spacing=12,
+        largest_seconds = max(item.total_seconds for item in result.topics)
+        return [statistics_comparison_row(
+            ft.Text(f"Assunto: {item.topic}" if item.topic is not None else "Sem assunto informado",
+                    italic=item.topic is None),
+            item.total_seconds, largest_seconds, "assunto", data=(item.subject_id, item.topic),
+            caption=ft.Text(labels[item.subject_id], size=12,
+                            tooltip=f"Identificador da matéria: {item.subject_id}"
+                            if labels[item.subject_id] != item.subject_name else None),
         ) for item in result.topics]
 
     async def read_statistics_view(kind: str, start: date, end: date) -> None:
@@ -1923,8 +1936,8 @@ async def main(page: ft.Page) -> None:
          ft.Text("A média inclui todos os dias do intervalo escolhido, inclusive descanso e datas futuras. "
                  "O estudo é contado somente até o instante da consulta."),
          statistics_stamp,
+         ft.Text("Em cada lista, as barras usam o maior tempo da própria lista como referência.", size=12),
          ft.Text("Tempo por matéria", size=18), statistics_subjects,
-         ft.Text("As barras usam como referência a matéria com maior tempo no período.", size=12),
          ft.Text("Tempo por tipo de estudo", size=18), statistics_types,
          ft.Text("Tempo por assunto", size=18), statistics_topics],
         expand=True, visible=False, scroll=ft.ScrollMode.AUTO,

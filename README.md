@@ -2,7 +2,7 @@
 
 Aplicativo pessoal de acompanhamento de estudos para **Windows e Android**, com registro de tempo, Pomodoro, metas diárias, ofensivas (streaks), calendário e estatísticas. Projeto **offline-first**: os dados são gravados localmente e sincronizados com a nuvem quando houver conexão.
 
-> **Status:** início do MVP offline. A versão 0.21.0 acrescentou o tempo por assunto dentro de cada matéria às Estatísticas; os 222 testes e a integração com controles Flet passaram. A etapa local 0.22.0 acrescenta barras para comparar o tempo por matéria no período aplicado; os 222 testes de regressão e a integração com controles Flet passaram. Falta a conferência na janela do Windows. As provas de conceito anteriores validaram persistência no Windows/Android, cronômetro progressivo no Windows e exibição do aviso de foco concluído no Windows, este confirmado pelo usuário em 28/10/2026. Avisos Android e com o app fechado seguem pendentes, nos marcos combinados.
+> **Status:** início do MVP offline. A versão 0.22.0 acrescentou barras para comparar o tempo por matéria; os 222 testes de regressão e a integração com controles Flet passaram. A etapa local 0.23.0 estende essa comparação às listas por tipo de estudo e assunto; os 222 testes de regressão e a integração com controles Flet passaram. A conferência na janela do Windows permanece pendente. As provas de conceito anteriores validaram persistência no Windows/Android, cronômetro progressivo no Windows e exibição do aviso de foco concluído no Windows, este confirmado pelo usuário em 28/10/2026. Avisos Android e com o app fechado seguem pendentes, nos marcos combinados.
 
 ## Funcionalidades planejadas
 
@@ -280,6 +280,12 @@ Em **Estatísticas → Tempo por matéria**, cada matéria recebe uma barra hori
 As barras usam os segundos originais da mesma consulta das três listas, incluindo frações de segundo, e não representam progresso de meta. Um período sem estudo mantém a mensagem existente, sem barras. Filtros, rascunhos, atualização após gravações e preservação dos resultados anteriores em falha seguem as regras das Estatísticas, sem consulta ou reconstrução das barras a cada segundo.
 
 Os 222 testes de regressão e a integração com controles Flet passaram, usando bancos temporários. A integração verificou proporções, empates, frações, homônimas, filtros, ausência de estudo e recuperação após falhas. Para conferir no Windows, abra Estatísticas, compare as barras em Hoje e Mês atual e aplique um intervalo sem estudo. Falta essa conferência na janela nativa. A mudança é somente visual, sem novas consultas, métricas, dependências, migração ou APK; o esquema continua na versão 7. Outras visualizações ficam para as próximas etapas.
+
+### Comparação por tipo e assunto — versão 0.23.0
+
+Em **Estatísticas**, as listas **Tempo por tipo de estudo** e **Tempo por assunto** também recebem barras horizontais. Cada lista usa seu próprio maior tempo como referência, explicado na legenda; as barras não representam uma meta. Os assuntos preservam a matéria, a identificação de nomes iguais e a distinção entre **Sem assunto informado** e um assunto com esse texto literal. Rótulos e durações continuam disponíveis, com barras de largura comum abaixo deles.
+
+As três listas compartilham a mesma função de apresentação e usam os segundos originais, incluindo frações. Filtros, rascunhos, atualização conjunta e preservação dos resultados em falha seguem as regras existentes, sem novas consultas, métricas, dependências, migração ou APK. Os 222 testes de regressão e a integração com controles Flet passaram, usando bancos temporários. Foram verificadas escalas próprias, empates, frações, contexto dos assuntos, filtros e recuperação após falhas. Para conferir na janela do Windows, compare as três listas em Hoje e Mês atual e aplique um período sem estudo; essa conferência permanece pendente.
 
 ## Princípios de desenvolvimento
 
