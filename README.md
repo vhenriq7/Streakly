@@ -2,7 +2,7 @@
 
 Aplicativo pessoal de acompanhamento de estudos para **Windows e Android**, com registro de tempo, Pomodoro, metas diárias, ofensivas (streaks), calendário e estatísticas. Projeto **offline-first**: os dados são gravados localmente e sincronizados com a nuvem quando houver conexão.
 
-> **Status:** início do MVP offline. A versão 0.24.0, com preferência de acompanhar o sistema, tema claro ou escuro em Configurações, está no GitHub; os 230 testes e a integração com controles Flet passaram. A etapa local 0.25.0 adapta a navegação à largura da janela, com menu lateral ou inferior; os 236 testes passaram, incluindo integração com controles Flet. A conferência na janela do Windows permanece pendente. As provas de conceito anteriores validaram persistência no Windows/Android, cronômetro progressivo no Windows e exibição do aviso de foco concluído no Windows, este confirmado pelo usuário em 28/10/2026. Avisos Android e com o app fechado seguem pendentes, nos marcos combinados.
+> **Status:** início do MVP offline. A versão 0.25.0, com menu lateral ou inferior conforme a largura da janela, está no GitHub; os 236 testes passaram, incluindo integração com controles Flet. A etapa local 0.26.0 permite rolar todo o conteúdo de Início e Matérias em janelas baixas; os 236 testes de regressão passaram. A conferência visual na janela do Windows permanece pendente. As provas de conceito anteriores validaram persistência no Windows/Android, cronômetro progressivo no Windows e exibição do aviso de foco concluído no Windows, este confirmado pelo usuário em 28/10/2026. Avisos Android e com o app fechado seguem pendentes, nos marcos combinados.
 
 ## Funcionalidades planejadas
 
@@ -299,9 +299,15 @@ O esquema 8 acrescenta `app_settings`, preservando matérias, estudos, metas e p
 
 O menu fica na lateral quando a largura da janela é de **800 pixels ou mais**. Abaixo disso, fica na base e permite **rolagem horizontal** para alcançar todos os destinos: Início, Matérias, Cronômetro, Histórico, Configurações, Calendário e Estatísticas. A tela atual permanece indicada também ao abrir o cronômetro ou as configurações pelos atalhos do Início. Enquanto a largura ainda não estiver disponível, o aplicativo usa o menu inferior.
 
-Redimensionar a janela muda somente a disposição do menu: mantém a tela aberta, a sessão em andamento, os rascunhos, a página do Histórico e os filtros de Estatísticas, sem repetir consultas. O atalho de matéria abre o Cronômetro antes de consultar suas preferências; se você mudar de tela durante a consulta, sua conclusão não força um retorno ao Cronômetro. O esquema continua na versão 8, sem migração, dependências novas ou APK. Os 236 testes passaram, incluindo integração com controles Flet e bancos temporários, sem usar o banco pessoal. A etapa 0.25.0 permanece local, com conferência visual pendente.
+Redimensionar a janela muda somente a disposição do menu: mantém a tela aberta, a sessão em andamento, os rascunhos, a página do Histórico e os filtros de Estatísticas, sem repetir consultas. O atalho de matéria abre o Cronômetro antes de consultar suas preferências; se você mudar de tela durante a consulta, sua conclusão não força um retorno ao Cronômetro. O esquema continua na versão 8, sem migração, dependências novas ou APK. Os 236 testes passaram, incluindo integração com controles Flet e bancos temporários, sem usar o banco pessoal. A versão 0.25.0 está no GitHub; a conferência visual permanece pendente.
 
 Para conferir no Windows, execute `main.py`, reduza e amplie a janela e percorra os sete destinos nas duas disposições. Na janela estreita, role o menu inferior até os últimos botões. Inicie uma sessão e redimensione durante a contagem; confira também que um campo ainda não salvo, a página do Histórico e um filtro personalizado permanecem preenchidos. Use os atalhos do Início para conferir a indicação da tela selecionada. Esse teste de largura no PC não substitui a validação física no Android, reservada ao marco combinado.
+
+### Rolagem de Início e Matérias — versão 0.26.0
+
+Em janelas baixas, **Início** permite rolar dos indicadores diários até a última matéria. Em **Matérias**, cadastro, renomeação e lista passam a fazer parte da mesma rolagem vertical. Assim, os formulários e atalhos continuam alcançáveis quando o conteúdo excede a altura disponível.
+
+Redimensionar mantém os controles existentes, o preenchimento e a sessão em andamento, sem consultas extras ou alterações de dados. Os 236 testes de regressão passaram, incluindo integração com controles Flet e bancos temporários; o banco pessoal não foi usado. Esta etapa fica local, com conferência visual pendente. O esquema continua na versão 8, sem migração, dependências novas ou APK. Para conferir no Windows, reduza a altura da janela, role Início até a última matéria e percorra cadastro e renomeação em Matérias; navegue e retorne para conferir o rascunho. Repita com uma sessão em andamento. A conferência no PC não substitui o marco de testes físicos no Android.
 
 ## Princípios de desenvolvimento
 

@@ -8,6 +8,8 @@ Aplicativo pessoal de estudos para **Windows e Android**, com experiência simpl
 
 **MVP 0.25.0 — navegação adaptável:** usar menu lateral em larguras a partir de 800 pixels e menu inferior com rolagem horizontal abaixo desse limite. Quando a largura ainda não estiver disponível, iniciar com menu inferior. Preservar os sete destinos existentes: Início, Matérias, Cronômetro, Histórico, Configurações, Calendário e Estatísticas, com rótulos visíveis e indicação do destino atual. Os atalhos do Início para Cronômetro e Configurações devem atualizar essa indicação. Concluir uma consulta de navegação ou do atalho de matéria não deve trocar o destino escolhido durante a espera. Redimensionar muda apenas a disposição da navegação, sem recriar painéis, repetir consultas ou alterar sessão, rascunhos, paginação e filtros. A validação cotidiana usa a janela do Windows em larguras diferentes; isso não comprova execução no Android. Não há migração, dependências novas ou APK nesta etapa.
 
+**MVP 0.26.0 — rolagem de Início e Matérias:** permitir rolar todo o conteúdo de cada um desses painéis quando ultrapassar a altura disponível, incluindo indicadores, atalhos, cadastro, renomeação e lista de matérias. Usar uma rolagem vertical por painel, preservando controles, callbacks, rascunhos, seleção de tela e sessão ao redimensionar. A mudança de tamanho não consulta nem grava dados. Histórico e Calendário mantêm o comportamento existente nesta etapa. Validar cotidianamente no Windows em janelas baixas, sem presumir validação física no Android. Não há migração, dependências novas ou APK; o esquema permanece na versão 8.
+
 ## 2. Matérias e classificação
 
 - Criar, renomear e excluir matérias.

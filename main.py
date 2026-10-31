@@ -224,9 +224,9 @@ async def main(page: ft.Page) -> None:
     rename_name = ft.TextField(label="Novo nome da matéria")
     rename_context = ft.Text()
     rename_message = ft.Text()
-    subjects = ft.ListView(
+    subjects = ft.Column(
         controls=[ft.Text("Nenhuma matéria cadastrada ainda.")],
-        expand=True, spacing=8,
+        spacing=8, horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
     )
     daily_date = ft.Text()
     daily_total = ft.Text("Carregando…", size=40, weight=ft.FontWeight.BOLD)
@@ -289,9 +289,9 @@ async def main(page: ft.Page) -> None:
         horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
     )
     home_session = ft.Text()
-    home_subjects = ft.ListView(
+    home_subjects = ft.Column(
         controls=[ft.Text("Nenhuma matéria cadastrada ainda.")],
-        expand=True, spacing=8,
+        spacing=8, horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
     )
     history_status = ft.Text("Abra o histórico para consultar as sessões finalizadas.")
     history_page_label = ft.Text()
@@ -1957,7 +1957,8 @@ async def main(page: ft.Page) -> None:
     )
     subjects_panel = ft.Column(
         [ft.Text("Minhas matérias", size=20), name_field, save_button, rename_panel, subjects],
-        expand=True, visible=False, horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+        expand=True, visible=False, scroll=ft.ScrollMode.AUTO,
+        horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
     )
     home_panel = ft.Column(
         [
@@ -1968,7 +1969,8 @@ async def main(page: ft.Page) -> None:
             ft.Text("Sessão em andamento", size=20), home_session, open_session_button,
             ft.Text("Minhas matérias", size=20), home_subjects,
         ],
-        expand=True, horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+        expand=True, scroll=ft.ScrollMode.AUTO,
+        horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
     )
     timer_panel = ft.Column(
         [
