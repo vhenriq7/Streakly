@@ -2,7 +2,7 @@
 
 Aplicativo pessoal de acompanhamento de estudos para **Windows e Android**, com registro de tempo, Pomodoro, metas diárias, ofensivas (streaks), calendário e estatísticas. Projeto **offline-first**: os dados são gravados localmente e sincronizados com a nuvem quando houver conexão.
 
-> **Status:** início do MVP offline. A versão 0.25.0, com menu lateral ou inferior conforme a largura da janela, está no GitHub; os 236 testes passaram, incluindo integração com controles Flet. A etapa local 0.26.0 permite rolar todo o conteúdo de Início e Matérias em janelas baixas; os 236 testes de regressão passaram. A conferência visual na janela do Windows permanece pendente. As provas de conceito anteriores validaram persistência no Windows/Android, cronômetro progressivo no Windows e exibição do aviso de foco concluído no Windows, este confirmado pelo usuário em 28/10/2026. Avisos Android e com o app fechado seguem pendentes, nos marcos combinados.
+> **Status:** início do MVP offline. A versão 0.27.0 adapta a grade do Calendário a janelas estreitas com largura mínima e rolagem horizontal; os 237 testes passaram, incluindo integração com os controles Flet e SQLite temporário. A conferência visual na janela do Windows permanece pendente. As provas de conceito anteriores validaram persistência no Windows/Android, cronômetro progressivo no Windows e exibição do aviso de foco concluído no Windows, este confirmado pelo usuário em 28/10/2026. Avisos Android e com o app fechado seguem pendentes, nos marcos combinados.
 
 ## Funcionalidades planejadas
 
@@ -307,7 +307,13 @@ Para conferir no Windows, execute `main.py`, reduza e amplie a janela e percorra
 
 Em janelas baixas, **Início** permite rolar dos indicadores diários até a última matéria. Em **Matérias**, cadastro, renomeação e lista passam a fazer parte da mesma rolagem vertical. Assim, os formulários e atalhos continuam alcançáveis quando o conteúdo excede a altura disponível.
 
-Redimensionar mantém os controles existentes, o preenchimento e a sessão em andamento, sem consultas extras ou alterações de dados. Os 236 testes de regressão passaram, incluindo integração com controles Flet e bancos temporários; o banco pessoal não foi usado. Esta etapa fica local, com conferência visual pendente. O esquema continua na versão 8, sem migração, dependências novas ou APK. Para conferir no Windows, reduza a altura da janela, role Início até a última matéria e percorra cadastro e renomeação em Matérias; navegue e retorne para conferir o rascunho. Repita com uma sessão em andamento. A conferência no PC não substitui o marco de testes físicos no Android.
+Redimensionar mantém os controles existentes, o preenchimento e a sessão em andamento, sem consultas extras ou alterações de dados. Os 236 testes de regressão passaram, incluindo integração com controles Flet e bancos temporários; o banco pessoal não foi usado. A versão 0.26.0 está no GitHub; a conferência visual permanece pendente. O esquema continua na versão 8, sem migração, dependências novas ou APK. Para conferir no Windows, reduza a altura da janela, role Início até a última matéria e percorra cadastro e renomeação em Matérias; navegue e retorne para conferir o rascunho. Repita com uma sessão em andamento. A conferência no PC não substitui o marco de testes físicos no Android.
+
+### Calendário em janelas estreitas — versão 0.27.0
+
+A grade do **Calendário** mantém largura mínima de **640 pixels** e permite rolagem horizontal para alcançar todos os dias, inclusive sábado e domingo, em janelas estreitas. O cabeçalho dos dias da semana acompanha a grade na mesma rolagem. Ao ampliar a janela, a grade preenche a largura disponível. Título, avisos, legenda e editor de planejamento permanecem fora dessa área horizontal.
+
+Redimensionar preserva os botões dos dias, o mês consultado, o planejamento em edição e a sessão, sem remontar a grade ou repetir consultas. A suíte completa de **237 testes passou**; a integração com controles Flet confirmou largura mínima e expansão, identidade dos botões e ausência de consultas ou gravações causadas pelo redimensionamento. A conferência visual ainda está pendente. O esquema continua na versão 8, sem migração, dependências novas ou APK. Para conferir no Windows, estreite a janela, role até sábado e domingo, selecione um dia, edite e cancele o planejamento. Navegue entre meses com um campo ainda preenchido e confira que ele permanece; amplie a janela e verifique o preenchimento da largura disponível. Esse teste no PC não substitui o marco de validação física no Android.
 
 ## Princípios de desenvolvimento
 

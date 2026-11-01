@@ -254,6 +254,47 @@ class NavigationTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(self.button("Retomar").visible)
         self.assertEqual(self.database_snapshot(), running_snapshot)
 
+    async def test_calendar_horizontal_resize_preserves_grid_without_queries(self):
+        await self.navigate(5)
+        self.assert_destination(5)
+        panel = self.panel(5)
+        viewport = next(
+            item for item in walk(panel)
+            if isinstance(item, ft.Container) and item.on_size_change is not None
+        )
+        self.assertEqual(viewport.content.scroll, ft.ScrollMode.ALWAYS)
+        table = viewport.content.controls[0]
+        weekday_header, month_grid = table.controls
+        original_rows = tuple(month_grid.controls)
+        original_cells = tuple(
+            cell for row in original_rows for cell in row.controls
+        )
+        snapshot = self.database_snapshot()
+        readers = (
+            "read_study_overview", "read_monthly_calendar", "read_daily_plan",
+            "read_period_statistics", "read_theme_mode",
+        )
+
+        with patch.multiple(app, **{name: DEFAULT for name in readers}) as mocks:
+            for width, expected in ((360, 640), (640, 640), (920, 920), (0, 920), (920, 920)):
+                with self.subTest(width=width):
+                    await dispatch(
+                        viewport.on_size_change, viewport, width=width, height=400,
+                    )
+                    self.assertEqual(table.width, expected)
+                    self.assertIs(table.controls[0], weekday_header)
+                    self.assertIs(table.controls[1], month_grid)
+                    self.assertEqual(tuple(month_grid.controls), original_rows)
+                    self.assertEqual(
+                        tuple(cell for row in month_grid.controls for cell in row.controls),
+                        original_cells,
+                    )
+            for reader in mocks.values():
+                reader.assert_not_called()
+
+        self.assertEqual(self.database_snapshot(), snapshot)
+        self.assert_destination(5)
+
     async def test_delayed_reads_do_not_restore_a_view_after_navigating_away(self):
         for index, reader_name in ((3, "read_session_history"), (4, "read_theme_mode"),
                                    (5, "read_monthly_calendar"), (6, "read_period_statistics")):

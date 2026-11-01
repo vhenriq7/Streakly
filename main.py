@@ -62,6 +62,7 @@ MONTH_NAMES = ("Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
                "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro")
 THEME_LABELS = {"system": "Acompanhar o sistema", "light": "Claro", "dark": "Escuro"}
 NAVIGATION_BREAKPOINT = 800
+MONTH_MIN_WIDTH = 640
 
 
 def resolve_study_type(choice: str | None, custom_name: str | None) -> str:
@@ -259,6 +260,31 @@ async def main(page: ft.Page) -> None:
     month_status = ft.Text("O mês ainda não foi consultado.")
     month_error = ft.Text()
     month_grid = ft.Column(spacing=4)
+    month_weekday_header = ft.Row(
+        [ft.Container(ft.Text(name, size=11, text_align=ft.TextAlign.CENTER), expand=1)
+         for name in ("Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom")],
+        spacing=4,
+    )
+    month_table = ft.Column(
+        [month_weekday_header, month_grid], width=MONTH_MIN_WIDTH, tight=True,
+        horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+    )
+
+    def resize_month_grid(event: ft.LayoutSizeChangeEvent) -> None:
+        """Mantém cabeçalho e grade alinhados ao espaço disponível."""
+        if not connected or event.width <= 0:
+            return
+        width = max(MONTH_MIN_WIDTH, event.width)
+        if month_table.width == width:
+            return
+        month_table.width = width
+        if page.app_visible:
+            page.update()
+
+    month_viewport = ft.Container(
+        content=ft.Row([month_table], scroll=ft.ScrollMode.ALWAYS),
+        on_size_change=resize_month_grid,
+    )
     statistics_choice = ft.Dropdown(
         label="Período das estatísticas", value="month",
         options=[ft.DropdownOption(key=key, text=label) for key, label in (
@@ -2030,9 +2056,8 @@ async def main(page: ft.Page) -> None:
         [ft.Text("Calendário", size=20), month_title,
          ft.Row([month_previous_button, month_next_button, month_current_button, month_refresh_button], wrap=True),
          month_status, month_error,
-         ft.Row([ft.Container(ft.Text(name, size=11, text_align=ft.TextAlign.CENTER), expand=1)
-                 for name in ("Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom")], spacing=4),
-         month_grid,
+         month_viewport,
+         ft.Text("Role a grade para os lados quando necessário.", size=12),
          ft.Text("* Hoje · Verde: meta atingida · Laranja: abaixo da meta · Azul: descanso · Cinza: pendente, sem meta ou futuro.", size=12),
          ft.Row([plan_date, plan_query_button], wrap=True),
          plan_status, plan_message, plan_edit_button, plan_form],
