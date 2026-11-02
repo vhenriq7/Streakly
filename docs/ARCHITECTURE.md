@@ -318,6 +318,8 @@ O Android reutiliza `main.py`, `storage.py`, `timer.py` e `notifications.py`, co
 
 **Cursor remoto concorrente 0.35.0:** revisão estática identificou que um identity simples pode ser reservado antes da confirmação da transação e, portanto, não basta como cursor de paginação. A migração atribui o número persistido em trigger, depois de um lock transacional por usuário; gravações dessa conta aguardam a transação anterior confirmar ou reverter. Isso mantém ordenação de visibilidade, embora a sequência tenha lacunas. Não foi possível testar a função ou as políticas em PostgreSQL porque não há servidor ou projeto Supabase configurado.
 
+**Transporte REST 0.36.0:** supabase_sync.py usa somente a biblioteca padrão urllib. O envio é limitado a lotes de 100, usa conflito por (user_id, operation_id) para reenvios, e relê os UUIDs enviados comparando entidade, ação e payload antes de retornar IDs confirmados para eventual remoção da outbox. Uma divergência ou falha mantém o lote local. A leitura valida operações e ordenação do cursor remoto. A chave pública e o token são recebidos por chamada e não persistidos; chaves service_role/secret e redirecionamentos são recusados. Onze testes simulam a API; o projeto Supabase não está configurado e nenhuma chamada real foi feita. Login, aplicação transacional de mudanças recebidas, cursor local e coordenação com a interface permanecem pendentes.
+
 Antes do MVP completo:
 
 1. Empacotar e executar um aplicativo Flet simples no Android e Windows.

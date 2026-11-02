@@ -16,6 +16,8 @@ Aplicativo pessoal de estudos para **Windows e Android**, com experiência simpl
 
 **MVP 0.35.0 — cursor concorrente:** serializar a atribuição do cursor por conta dentro da transação de inclusão. Leituras paginadas por cursor não podem perder uma operação cuja transação tenha confirmado após o cliente avançar além de sua sequência. Lacunas são aceitas, mas cada nova operação visível da mesma conta precisa ter sequência maior que as já confirmadas. Validar comportamento concorrente em PostgreSQL/Supabase antes de ativar sincronização.
 
+**MVP 0.36.0 — transporte REST:** preparar envio de lotes da outbox ao diário Supabase, ignorando reenvios pela chave por conta/operação e confirmando que o servidor guardou o mesmo conteúdo antes de autorizar a remoção local. Buscar páginas ordenadas após o cursor com validação de forma e limite. Usar chave pública e token de sessão fornecido pelo futuro Auth, sem persistir nem registrar o token neste cliente. Não ligar o transporte à interface ou iniciar sincronização automática antes da configuração e teste do projeto Supabase. Sem dependências externas nesta etapa.
+
 ## 2. Matérias e classificação
 
 - Criar, renomear e excluir matérias.

@@ -2,7 +2,7 @@
 
 Aplicativo pessoal de acompanhamento de estudos para **Windows e Android**, com registro de tempo, Pomodoro, metas diárias, ofensivas (streaks), calendário e estatísticas. Projeto **offline-first**: os dados são gravados localmente e sincronizados com a nuvem quando houver conexão.
 
-> **Status:** MVP offline, versão 0.35.0. A fila local transacional e uma migração SQL preparam a sincronização; o diário remoto protegido por RLS ainda não foi aplicado a um projeto Supabase. O cursor serializa gravações por conta para manter paginação sem perdas. Login e envio à nuvem ainda não estão ativos. A versão 0.32.0 acrescentou notificações nativas de fim de fase do Pomodoro no Android. Os 260 testes locais passaram. Em 02/11/2026, o usuário confirmou notificações do sistema em um APK recente com o app aberto e em segundo plano; a versão exata testada não foi identificada. O GitHub Actions executa a suíte no Windows a cada push para main e pull request.
+> **Status:** MVP offline, versão 0.36.0. A fila local e o transporte REST preparam a sincronização; o diário remoto protegido por RLS ainda não foi aplicado a um projeto Supabase. O cursor serializa gravações por conta. Login, aplicação dos dados recebidos e sincronização automática ainda não estão conectados. A versão 0.32.0 acrescentou notificações nativas de fim de fase do Pomodoro no Android. Os 271 testes locais passaram. Em 02/11/2026, o usuário confirmou notificações do sistema em um APK recente com o app aberto e em segundo plano; a versão exata testada não foi identificada. O GitHub Actions executa a suíte no Windows a cada push para main e pull request.
 
 ## Funcionalidades planejadas
 
@@ -58,10 +58,10 @@ Se a `.venv` já existe, pule o primeiro comando. `requirements.txt` instala as 
 Com as dependências de `requirements.txt` instaladas, gere um executável independente com:
 
 ```powershell
-.\.venv\Scripts\flet.exe pack main.py --name Streakly --product-name Streakly --product-version 0.35.0 --file-version 0.35.0.0 --file-description "Acompanhamento pessoal de estudos" --distpath build/windows/0.35.0 --yes
+.\.venv\Scripts\flet.exe pack main.py --name Streakly --product-name Streakly --product-version 0.36.0 --file-version 0.36.0.0 --file-description "Acompanhamento pessoal de estudos" --distpath build/windows/0.36.0 --yes
 ```
 
-O resultado fica em `build/windows/0.35.0/Streakly.exe`; a pasta `build/` é local e ignorada pelo Git. `flet pack` usa PyInstaller para reunir o aplicativo e o runtime Python em um executável, sem exigir Python instalado no computador de quem o executa. Esta é uma prova de empacotamento, não um instalador: o arquivo ainda não tem assinatura digital. Atualize as opções de versão ao preparar uma nova versão do projeto. O banco continua em `%LOCALAPPDATA%\Streakly\poc.sqlite3`, fora do executável.
+O resultado fica em `build/windows/0.36.0/Streakly.exe`; a pasta `build/` é local e ignorada pelo Git. `flet pack` usa PyInstaller para reunir o aplicativo e o runtime Python em um executável, sem exigir Python instalado no computador de quem o executa. Esta é uma prova de empacotamento, não um instalador: o arquivo ainda não tem assinatura digital. Atualize as opções de versão ao preparar uma nova versão do projeto. O banco continua em `%LOCALAPPDATA%\Streakly\poc.sqlite3`, fora do executável.
 
 **Fluxo de testes combinado:** o desenvolvimento e a validação cotidiana serão feitos no Windows, executando `main.py` e os testes automatizados. Não gerar nem instalar um APK a cada mudança. Retomar os testes no Android em marcos maiores e nas mudanças que dependem da plataforma, como permissões, notificações, segundo plano, armazenamento e empacotamento.
 
@@ -364,6 +364,10 @@ O esquema SQLite 9 acrescenta uma fila local de operações com UUID próprio, e
 ### Cursor de sincronização — versão 0.35.0
 
 O cursor remoto é atribuído por um trigger que serializa inclusões da mesma conta com um lock transacional antes de reservar o número persistido. Isso impede que uma transação atrasada confirme uma operação abaixo de um cursor já lido. A sequência pode ter lacunas, que são permitidas; a ordenação por conta é que precisa ser estável. Esta correção ainda aguarda execução e teste de concorrência em PostgreSQL.
+
+### Transporte REST Supabase — versão 0.36.0
+
+O módulo supabase_sync.py envia lotes idempotentes e só confirma operações após reler e comparar o conteúdo remoto. Também busca páginas pelo cursor. Os testes usam respostas simuladas; o transporte não foi conectado à interface, não faz chamadas reais e não persiste credenciais. Login, aplicação das operações recebidas e teste contra um projeto Supabase ainda são necessários.
 
 ## Princípios de desenvolvimento
 
