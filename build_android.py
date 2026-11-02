@@ -81,6 +81,36 @@ def publish_apk(apk: Path) -> None:
     print(f"APK disponível em: {destination}")
 
 
+def patch_notification_build(build_root: Path, env: dict[str, str]) -> int:
+    """Patch the generated Android project and rebuild its release APK."""
+    project = build_root / "build" / "flutter"
+    patcher = Path(sys.executable).with_name("flet-android-notifications-patch.exe")
+    if not patcher.is_file():
+        raise RuntimeError("The Android notifications patcher is missing.")
+    code, _ = run_with_log(
+        [str(patcher), "--project-root", str(project)], build_root, env,
+    )
+    if code != 0:
+        return code
+
+    from flet.version import flutter_version
+    from flet_cli.utils.flutter import get_flutter_dir
+
+    flutter = Path(get_flutter_dir(flutter_version)) / "bin" / "flutter.bat"
+    if not flutter.is_file():
+        raise RuntimeError("The Flutter SDK used by Flet was not found.")
+    code, _ = run_with_log(
+        [str(flutter), "build", "apk", "--release"], project, env,
+    )
+    if code != 0:
+        return code
+    apk = project / "build" / "app" / "outputs" / "flutter-apk" / "app-release.apk"
+    if not apk.is_file():
+        raise RuntimeError("The rebuilt Android APK was not found.")
+    publish_apk(apk)
+    return 0
+
+
 def main() -> int:
     # O PowerShell pode usar uma codificação antiga mesmo com logs em UTF-8.
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -117,11 +147,7 @@ def main() -> int:
         [str(cli), "build", "apk", "--yes", "--no-rich-output"], build_root, env
     )
     if code == 0:
-        apks = list((build_root / "build" / "apk").glob("*.apk"))
-        if len(apks) != 1:
-            raise RuntimeError("O Flet não gerou exatamente um APK universal de teste.")
-        publish_apk(apks[0])
-        return 0
+        return patch_notification_build(build_root, env)
     # O Flet pode quebrar a mensagem de erro em várias linhas no terminal.
     normalized_log = " ".join(log.split())
     if "Included build" not in normalized_log or "does not exist" not in normalized_log:
@@ -165,6 +191,12 @@ def main() -> int:
     )
     print("Aplicando escapes Java apenas no arquivo gerado local.properties.")
     properties.write_text(escape_properties(text), encoding="ascii")
+    patcher = Path(sys.executable).with_name("flet-android-notifications-patch.exe")
+    code, _ = run_with_log(
+        [str(patcher), "--project-root", str(build / "flutter")], build_root, env,
+    )
+    if code != 0:
+        return code
     code, _ = run_with_log(
         [
             str(android / "gradlew.bat"), ":app:assembleRelease",

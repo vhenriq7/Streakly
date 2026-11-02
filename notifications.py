@@ -6,17 +6,38 @@ import os
 import subprocess
 import sys
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from storage import ReminderSettings
-from timer import StudySession
+from timer import StudySession, as_utc
 
 
 @dataclass(frozen=True)
 class PhaseNotice:
     title: str
     body: str
+
+
+def running_phase_notice(session: StudySession | None) -> tuple[datetime, PhaseNotice] | None:
+    """Retorna o prazo e o aviso da fase Pomodoro que está em andamento."""
+    phase = session.pomodoro if session else None
+    if (session is None or session.status != "running" or session.mode != "pomodoro"
+            or phase is None or phase.state != "running" or phase.started_at is None):
+        return None
+
+    subject = session.subject_name.strip()
+    if len(subject) > 80:
+        subject = subject[:77] + "…"
+    if phase.phase == "focus":
+        next_focus = phase.completed_focuses + 1
+        long_break = next_focus % phase.cycles_until_long_break == 0
+        pause = "pausa longa" if long_break else "pausa curta"
+        body = f"{subject}: foco concluído. Inicie a {pause} quando quiser."
+    else:
+        body = f"{subject}: pausa concluída. Inicie o próximo foco quando quiser."
+    deadline = as_utc(phase.started_at) + timedelta(seconds=phase.remaining_seconds)
+    return deadline, PhaseNotice("Streakly — Pomodoro", body)
 
 
 class PhaseAlertTracker:

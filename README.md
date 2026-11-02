@@ -2,7 +2,7 @@
 
 Aplicativo pessoal de acompanhamento de estudos para **Windows e Android**, com registro de tempo, Pomodoro, metas diárias, ofensivas (streaks), calendário e estatísticas. Projeto **offline-first**: os dados são gravados localmente e sincronizados com a nuvem quando houver conexão.
 
-> **Status:** início do MVP offline. As versões 0.28.0 e 0.29.0 acrescentam exportações CSV/JSON, e a 0.30.0 acrescenta prévia e mesclagem segura do backup por identificador. A versão 0.31.0 acrescenta lembretes diários opcionais no Windows; **249 testes passaram**. O GitHub Actions executa a suíte no Windows a cada push para `main` e pull request. O executável Windows 0.31.0 foi gerado e o usuário confirmou que abriu e preservou os dados ao reabrir. O usuário também relatou uma notificação Android do sistema num APK recente, com o app aberto e em segundo plano; como a versão e o código desse APK não estão disponíveis no repositório, esse comportamento ainda não foi reproduzido a partir da branch principal. Alertas Android com o app encerrado seguem pendentes.
+> **Status:** MVP offline, versão 0.32.0. Lembretes diários no Windows e notificações nativas de fim de fase do Pomodoro no Android. O APK foi compilado e o manifesto inclui as permissões e receivers de alarme. **252 testes passaram**; a confirmação física desta versão no Android ainda está pendente. O GitHub Actions executa a suíte no Windows a cada push para main e pull request.
 
 ## Funcionalidades planejadas
 
@@ -58,10 +58,10 @@ Se a `.venv` já existe, pule o primeiro comando. `requirements.txt` instala as 
 Com as dependências de `requirements.txt` instaladas, gere um executável independente com:
 
 ```powershell
-.\.venv\Scripts\flet.exe pack main.py --name Streakly --product-name Streakly --product-version 0.31.0 --file-version 0.31.0.0 --file-description "Acompanhamento pessoal de estudos" --distpath build/windows/0.31.0 --yes
+.\.venv\Scripts\flet.exe pack main.py --name Streakly --product-name Streakly --product-version 0.32.0 --file-version 0.32.0.0 --file-description "Acompanhamento pessoal de estudos" --distpath build/windows/0.32.0 --yes
 ```
 
-O resultado fica em `build/windows/0.31.0/Streakly.exe`; a pasta `build/` é local e ignorada pelo Git. `flet pack` usa PyInstaller para reunir o aplicativo e o runtime Python em um executável, sem exigir Python instalado no computador de quem o executa. Esta é uma prova de empacotamento, não um instalador: o arquivo ainda não tem assinatura digital. Atualize as opções de versão ao preparar uma nova versão do projeto. O banco continua em `%LOCALAPPDATA%\Streakly\poc.sqlite3`, fora do executável.
+O resultado fica em `build/windows/0.32.0/Streakly.exe`; a pasta `build/` é local e ignorada pelo Git. `flet pack` usa PyInstaller para reunir o aplicativo e o runtime Python em um executável, sem exigir Python instalado no computador de quem o executa. Esta é uma prova de empacotamento, não um instalador: o arquivo ainda não tem assinatura digital. Atualize as opções de versão ao preparar uma nova versão do projeto. O banco continua em `%LOCALAPPDATA%\Streakly\poc.sqlite3`, fora do executável.
 
 **Fluxo de testes combinado:** o desenvolvimento e a validação cotidiana serão feitos no Windows, executando `main.py` e os testes automatizados. Não gerar nem instalar um APK a cada mudança. Retomar os testes no Android em marcos maiores e nas mudanças que dependem da plataforma, como permissões, notificações, segundo plano, armazenamento e empacotamento.
 
@@ -346,6 +346,12 @@ Antes de aplicar, o Streakly pede para salvar um backup JSON do banco atual. A m
 ### Lembretes diários no Windows — versão 0.31.0
 
 Configurações oferece dois lembretes opcionais com horários locais: lembrar de estudar e avisar quando uma meta diária ainda estiver pendente. O aviso de meta não aparece em dias de descanso, sem meta ou após atingir o objetivo. Os padrões são desligados. Preferências ficam no SQLite local e entram nos backups JSON existentes. No Windows, os avisos são verificados enquanto o aplicativo está aberto ou minimizado; não há agendamento quando o processo está encerrado nem envio nativo Android nesta etapa. Não há migração nem dependências novas. A conferência manual da janela permanece pendente.
+
+### Notificações Android do Pomodoro — versão 0.32.0
+
+No Android, o botão **Ativar avisos Android** solicita as permissões do sistema, envia uma notificação de teste e agenda o término da fase Pomodoro em andamento. A notificação do sistema continua agendada quando o Streakly vai para segundo plano; pausar ou finalizar cancela o alarme. O próximo foco ou pausa ainda precisa ser iniciado manualmente. Alarmes exatos dependem da permissão correspondente; se ela não for concedida, o Android usa um alarme aproximado. Os lembretes diários continuam limitados ao Windows.
+
+A integração usa `flet-android-notifications==0.12.0`, pacote comunitário MIT marcado como Alpha. O helper Android aplica o manifesto exigido e recompila o APK após o build Flet. A suíte de testes valida o cálculo do prazo a partir do estado persistido; o APK precisa ser instalado no Android para confirmar as permissões e o comportamento real em segundo plano.
 
 ## Princípios de desenvolvimento
 

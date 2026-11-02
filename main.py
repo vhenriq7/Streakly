@@ -14,6 +14,7 @@ from notifications import (
     PhaseAlertTracker,
     DailyReminderTracker,
     PhaseNotice,
+    running_phase_notice,
     send_windows_notice,
     windows_notifications_available,
 )
@@ -279,6 +280,16 @@ async def main(page: ft.Page) -> None:
     ticker = None
     connected = True
     notifications_available = windows_notifications_available()
+    android_notifications = None
+    android_notifications_enabled = False
+    android_permissions_checked = False
+    android_exact_alarms_enabled = False
+    android_schedule_key: tuple[str, str, datetime, float] | None = None
+    is_android = getattr(page, "platform", None) == ft.PagePlatform.ANDROID
+    if is_android:
+        from flet_android_notifications import FletAndroidNotifications
+
+        android_notifications = FletAndroidNotifications()
     alert_tracker = PhaseAlertTracker()
     reminder_tracker = DailyReminderTracker()
     pending_notices: set[asyncio.Task] = set()
@@ -447,6 +458,75 @@ async def main(page: ft.Page) -> None:
         if notifications_available else "A conclusão de cada fase aparece nesta tela."
     )
 
+    if is_android:
+        notification_hint.value = "Ative os avisos Android para receber notificações em segundo plano."
+
+    async def sync_android_phase_notice(active: StudySession | None) -> None:
+        nonlocal android_schedule_key
+        if android_notifications is None:
+            return
+        phase_schedule = running_phase_notice(active) if android_notifications_enabled else None
+        key = ((active.id, active.pomodoro.phase, active.pomodoro.started_at,
+                active.pomodoro.remaining_seconds)
+               if phase_schedule and active and active.pomodoro else None)
+        if key == android_schedule_key:
+            return
+        try:
+            await android_notifications.cancel(notification_id=1)
+            android_schedule_key = None
+            if phase_schedule:
+                deadline, notice = phase_schedule
+                await android_notifications.schedule_notification(
+                    notification_id=1,
+                    title=notice.title,
+                    body=notice.body,
+                    scheduled_time=deadline,
+                    schedule_mode=("exact_allow_while_idle" if android_exact_alarms_enabled
+                                   else "inexact_allow_while_idle"),
+                    channel_id="streakly_pomodoro",
+                    channel_name="Pomodoro",
+                    channel_description="Avisos de fim das fases do Pomodoro",
+                )
+                android_schedule_key = key
+        except Exception:
+            android_schedule_key = None
+            notification_hint.value = "Não foi possível agendar o aviso Android. Confira as permissões do Streakly."
+
+    async def enable_android_notices(event) -> None:
+        nonlocal android_notifications_enabled, android_permissions_checked
+        nonlocal android_exact_alarms_enabled
+        if android_notifications is None:
+            return
+        try:
+            android_notifications_enabled = await android_notifications.request_permissions()
+            android_permissions_checked = True
+            if not android_notifications_enabled:
+                notification_hint.value = "Permissão de notificações negada. Ative-a nas configurações do Android."
+                render()
+                return
+            android_exact_alarms_enabled = await android_notifications.can_schedule_exact_notifications()
+            if not android_exact_alarms_enabled:
+                android_exact_alarms_enabled = await android_notifications.request_exact_alarm_permission()
+            await android_notifications.show_notification(
+                notification_id=2,
+                title="Streakly — teste de aviso",
+                body="Os avisos do Pomodoro estão ativos neste aparelho.",
+                channel_id="streakly_pomodoro",
+                channel_name="Pomodoro",
+                channel_description="Avisos de fim das fases do Pomodoro",
+            )
+            notification_hint.value = (
+                "Avisos Android ativos. As fases serão avisadas mesmo com o app em segundo plano."
+                if android_exact_alarms_enabled else
+                "Avisos ativos com horário aproximado; permita alarmes exatos para maior precisão."
+            )
+            await sync_android_phase_notice(session)
+        except Exception:
+            android_notifications_enabled = False
+            android_permissions_checked = True
+            notification_hint.value = "Não foi possível ativar os avisos. Confira as permissões do Streakly no Android."
+        render()
+
     async def deliver_notice(notice: PhaseNotice) -> None:
         try:
             sent = await asyncio.to_thread(send_windows_notice, notice)
@@ -466,6 +546,9 @@ async def main(page: ft.Page) -> None:
             task.add_done_callback(pending_notices.discard)
 
     def test_notice(event) -> None:
+        if is_android:
+            asyncio.create_task(enable_android_notices(event))
+            return
         if pending_notices:
             return
         queue_notice(PhaseNotice(
@@ -544,6 +627,8 @@ async def main(page: ft.Page) -> None:
 
     async def refresh_state(*, reload_study_types: bool = False, reload_streak: bool = False,
                             reload_statistics: bool = False) -> None:
+        nonlocal android_notifications_enabled, android_permissions_checked
+        nonlocal android_exact_alarms_enabled
         nonlocal session, subject_options, settings_subject, ready, today, today_seconds
         nonlocal subject_selection_removed, recorded_study_types, daily_goal, today_override
         nonlocal streak_base, streak_zone_key
@@ -612,6 +697,16 @@ async def main(page: ft.Page) -> None:
             fill_pomodoro_fields(settings)
             settings_subject = subject_choice.value
         session = active
+        if android_notifications is not None:
+            if not android_permissions_checked:
+                try:
+                    android_notifications_enabled = await android_notifications.are_notifications_enabled()
+                    android_exact_alarms_enabled = await android_notifications.can_schedule_exact_notifications()
+                except Exception:
+                    android_notifications_enabled = False
+                android_permissions_checked = True
+            if android_notifications_enabled:
+                await sync_android_phase_notice(active)
         today, today_seconds = overview.day, overview.total_seconds
         daily_goal = overview.goal
         today_override = overview.goal_override
@@ -862,7 +957,7 @@ async def main(page: ft.Page) -> None:
         preset_choice.visible = is_pomodoro
         custom_panel.visible = is_pomodoro and preset_choice.value == "custom"
         notification_hint.visible = is_pomodoro
-        test_notice_button.visible = is_pomodoro and notifications_available
+        test_notice_button.visible = is_pomodoro and (notifications_available or is_android)
         test_notice_button.disabled = locked or bool(pending_notices)
         start_button.disabled = locked or active or not subject_options
         pause_button.visible = active and (phase.state == "running" if phase else session.status == "running")
@@ -2334,7 +2429,10 @@ async def main(page: ft.Page) -> None:
     resume_button = ft.Button("Retomar", on_click=resume)
     next_button = ft.Button("Iniciar próxima fase", on_click=next_phase)
     finish_button = ft.Button("Finalizar", on_click=finish)
-    test_notice_button = ft.TextButton("Testar aviso do Windows", on_click=test_notice)
+    test_notice_button = ft.TextButton(
+        "Ativar avisos Android" if is_android else "Testar aviso do Windows",
+        on_click=test_notice,
+    )
     open_session_button = ft.TextButton("Abrir sessão em andamento", on_click=lambda event: show_timer(event))
     history_refresh_button = ft.TextButton("Atualizar", on_click=refresh_history)
     history_export_button = ft.TextButton("Exportar CSV", on_click=export_history)

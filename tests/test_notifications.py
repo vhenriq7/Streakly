@@ -48,6 +48,37 @@ def ready_session(*, phase="break", deadline=60, long_break=False):
 
 
 class PhaseAlertTrackerTests(unittest.TestCase):
+    def test_running_phase_notice_returns_saved_deadline_and_manual_next_step(self):
+        deadline, notice = notifications.running_phase_notice(running_session())
+        self.assertEqual(deadline, at(60))
+        self.assertIn("foco conclu", notice.body.lower())
+        self.assertIn("pausa curta", notice.body.lower())
+
+    def test_running_break_notice_and_inactive_states(self):
+        running = running_session()
+        running_break = replace(
+            running,
+            pomodoro=replace(running.pomodoro, phase="break", is_long_break=True),
+        )
+        deadline, notice = notifications.running_phase_notice(running_break)
+        self.assertEqual(deadline, at(60))
+        self.assertIn("pausa conclu", notice.body.lower())
+        self.assertIsNone(notifications.running_phase_notice(None))
+        self.assertIsNone(notifications.running_phase_notice(
+            replace(running, status="paused", pomodoro=replace(
+                running.pomodoro, state="paused", started_at=None,
+            )),
+        ))
+
+    def test_last_focus_of_cycle_announces_the_long_break(self):
+        running = running_session()
+        final_focus = replace(
+            running,
+            pomodoro=replace(running.pomodoro, completed_focuses=3),
+        )
+        _, notice = notifications.running_phase_notice(final_focus)
+        self.assertIn("pausa longa", notice.body.lower())
+
     def test_first_read_of_old_ready_phase_and_reopening_do_not_alert(self):
         ready = ready_session()
         first_page = notifications.PhaseAlertTracker()

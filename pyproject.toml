@@ -1,14 +1,18 @@
 [project]
 name = "streakly"
-version = "0.31.0"
+version = "0.32.0"
 description = "Prova de conceito offline de acompanhamento de estudos"
 requires-python = ">=3.14,<3.15"
-dependencies = ["flet==1.0.5"]
+dependencies = ["flet==1.0.5", "flet-android-notifications==0.12.0"]
 
 [tool.flet]
 product = "Streakly"
 bundle_id = "com.streakly.poc"
-build_number = 31
+build_number = 32
+
+[tool.flet.android.permission]
+"android.permission.POST_NOTIFICATIONS" = true
+"android.permission.SCHEDULE_EXACT_ALARM" = true
 
 [tool.flet.app]
 path = "."
