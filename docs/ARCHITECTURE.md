@@ -217,6 +217,8 @@ Título, avisos, legenda e editor ficam fora da área horizontal. O ajuste de la
 
 **Empacotamento Windows 0.31.0:** `flet pack main.py` usa PyInstaller para gerar um executável independente. `requirements.txt` fixa PyInstaller 6.22.3 para reproduzir o build; o comando e os metadados de versão ficam no README. O artefato vai para `build/windows/0.31.0/`, pasta ignorada pelo Git, e o SQLite continua no `%LOCALAPPDATA%` do usuário. Foi gerado `Streakly.exe` com nome, descrição e versões do produto/arquivo. O processo iniciou usando `LOCALAPPDATA` temporário, criou o banco com esquema 8 e passou em `PRAGMA integrity_check`; o banco não contém matérias. O usuário confirmou a abertura da janela e a persistência dos dados após fechar e reabrir o executável. Este pacote não é instalador e não tem assinatura digital. A validação Android permanece no marco combinado.
 
+**Relato de notificação Android:** em 02/11/2026, o usuário informou que um APK recente mostrou uma notificação do sistema tanto com o Streakly aberto quanto em segundo plano. A versão e a origem exatas desse APK não estão disponíveis no repositório; `build/apk/` não contém artefato. A branch principal atual não implementa notificações nativas Android: no Android, o ciclo aguarda a tela voltar a ficar visível e apresenta a conclusão do Pomodoro dentro do app. Portanto, o relato é registrado como validação externa do usuário, mas não como comportamento reproduzível a partir do código publicado. Alertas com o processo encerrado também não foram confirmados.
+
 ## 6. Protocolo de sincronização
 
 1. Salvar alteração **em transação local**, junto com item na outbox.
