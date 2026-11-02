@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from storage import ReminderSettings
 from timer import StudySession
 
 
@@ -51,6 +52,32 @@ class PhaseAlertTracker:
         else:
             body = f"{subject}: pausa concluída. Inicie o próximo foco quando quiser."
         return PhaseNotice("Streakly — Pomodoro", body)
+
+
+class DailyReminderTracker:
+    """Gera no máximo um aviso por horário configurado e data local."""
+
+    def __init__(self) -> None:
+        self._sent: set[tuple[str, object, str]] = set()
+
+    def observe(self, moment: datetime, settings: ReminderSettings,
+                *, goal_pending: bool) -> tuple[PhaseNotice, ...]:
+        local_moment = moment.astimezone()
+        today = local_moment.date()
+        current_time = local_moment.strftime("%H:%M")
+        notices: list[PhaseNotice] = []
+        reminders = (
+            ("study", settings.study_enabled, settings.study_time,
+             PhaseNotice("Streakly — hora de estudar", "Hora de estudar. Abra o Streakly para registrar sua sessão.")),
+            ("goal", settings.goal_enabled and goal_pending, settings.goal_time,
+             PhaseNotice("Streakly — meta diária", "Sua meta de estudos ainda está pendente hoje.")),
+        )
+        for kind, enabled, scheduled_time, notice in reminders:
+            key = (kind, today, scheduled_time)
+            if enabled and current_time == scheduled_time and key not in self._sent:
+                self._sent.add(key)
+                notices.append(notice)
+        return tuple(notices)
 
 
 # O código é constante. Nomes de matérias entram apenas como dados JSON pelo stdin.

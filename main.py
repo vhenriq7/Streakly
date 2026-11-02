@@ -12,6 +12,7 @@ import flet as ft
 
 from notifications import (
     PhaseAlertTracker,
+    DailyReminderTracker,
     PhaseNotice,
     send_windows_notice,
     windows_notifications_available,
@@ -23,6 +24,7 @@ from storage import (
     DefaultDailyGoal,
     MonthlyCalendar,
     PeriodStatistics,
+    ReminderSettings,
     StreakBase,
     add_subject,
     create_manual_session,
@@ -45,12 +47,14 @@ from storage import (
     read_period_statistics,
     read_study_overview,
     read_theme_mode,
+    read_reminder_settings,
     read_subject_deletion_preview,
     rename_subject,
     resume_session,
     set_default_daily_goal,
     set_daily_goal_override,
     set_theme_mode,
+    set_reminder_settings,
     start_next_phase,
     start_session,
     update_finished_session,
@@ -247,6 +251,11 @@ async def main(page: ft.Page) -> None:
     theme_loading = False
     theme_saving = False
     theme_request: object | None = None
+    saved_reminders = ReminderSettings()
+    reminders_loaded = False
+    reminders_loading = False
+    reminders_saving = False
+    reminders_request: object | None = None
     history_offset = 0
     history_has_more = False
     history_loaded = False
@@ -271,6 +280,7 @@ async def main(page: ft.Page) -> None:
     connected = True
     notifications_available = windows_notifications_available()
     alert_tracker = PhaseAlertTracker()
+    reminder_tracker = DailyReminderTracker()
     pending_notices: set[asyncio.Task] = set()
 
     message = ft.Text()
@@ -296,6 +306,12 @@ async def main(page: ft.Page) -> None:
     )
     theme_status = ft.Text("Carregando tema…")
     theme_message = ft.Text()
+    study_reminder_enabled = ft.Checkbox(label="Lembrar de estudar", value=False)
+    study_reminder_time = ft.TextField(label="Horário (HH:MM)", value="18:00", width=180)
+    goal_reminder_enabled = ft.Checkbox(label="Avisar se a meta estiver pendente", value=False)
+    goal_reminder_time = ft.TextField(label="Horário (HH:MM)", value="20:00", width=180)
+    reminders_message = ft.Text()
+    reminders_status = ft.Text()
     backup_message = ft.Text("O backup inclui matérias, histórico, metas e preferências locais.")
     streak_current = ft.Text("Ofensiva indisponível.", size=18, weight=ft.FontWeight.BOLD)
     streak_record = ft.Text("Recorde indisponível.")
@@ -599,6 +615,15 @@ async def main(page: ft.Page) -> None:
         today, today_seconds = overview.day, overview.total_seconds
         daily_goal = overview.goal
         today_override = overview.goal_override
+        effective_seconds = (today_override.duration_seconds if today_override else
+                             daily_goal.duration_seconds if daily_goal else None)
+        is_rest_day = today_override is not None and today_override.is_rest_day
+        goal_pending = (effective_seconds is not None and not is_rest_day
+                        and today_seconds < effective_seconds)
+        if notifications_available and reminders_loaded:
+            for reminder_notice in reminder_tracker.observe(
+                    local_moment, saved_reminders, goal_pending=goal_pending):
+                queue_notice(reminder_notice)
         ready = True
         notice = alert_tracker.observe(active)
         if notice:
@@ -630,6 +655,22 @@ async def main(page: ft.Page) -> None:
         theme_status.value = ("Carregando tema…" if theme_loading else
                               f"Preferência salva: {THEME_LABELS[saved_theme]}." if theme_loaded else
                               "Tema indisponível. Use Atualizar tema.")
+        reminders_locked = (locked or reminders_loading or reminders_saving
+                            or delete_dialog is not None)
+        for control in (study_reminder_enabled, study_reminder_time,
+                        goal_reminder_enabled, goal_reminder_time):
+            control.disabled = reminders_locked or not reminders_loaded
+        reminders_save_button.disabled = (reminders_locked or not reminders_loaded
+                                          or ReminderSettings(
+                                              study_reminder_enabled.value is True,
+                                              study_reminder_time.value or "",
+                                              goal_reminder_enabled.value is True,
+                                              goal_reminder_time.value or "",
+                                          ) == saved_reminders)
+        reminders_refresh_button.disabled = reminders_locked
+        reminders_status.value = ("Carregando lembretes…" if reminders_loading else
+                                  "Preferências salvas neste dispositivo." if reminders_loaded else
+                                  "Lembretes indisponíveis. Use Atualizar.")
         if session:
             subject_choice.value = session.subject_id
             study_type.value = f"type:{session.study_type}"
@@ -1341,6 +1382,81 @@ async def main(page: ft.Page) -> None:
                 await read_theme_preference()
             finally:
                 busy = False
+                render()
+
+    def reminder_form_value() -> ReminderSettings:
+        return ReminderSettings(
+            study_enabled=study_reminder_enabled.value is True,
+            study_time=study_reminder_time.value or "",
+            goal_enabled=goal_reminder_enabled.value is True,
+            goal_time=goal_reminder_time.value or "",
+        )
+
+    def update_reminder_draft(event=None) -> None:
+        reminders_message.value = ""
+        render()
+
+    async def read_reminder_preference() -> None:
+        nonlocal saved_reminders, reminders_loaded, reminders_loading, reminders_request
+        request = object()
+        reminders_request = request
+        preserve_draft = reminders_loaded and reminder_form_value() != saved_reminders
+        reminders_loading = True
+        render()
+        try:
+            result = await asyncio.to_thread(read_reminder_settings)
+            if reminders_request is request and connected:
+                saved_reminders, reminders_loaded = result, True
+                if not preserve_draft:
+                    study_reminder_enabled.value = result.study_enabled
+                    study_reminder_time.value = result.study_time
+                    goal_reminder_enabled.value = result.goal_enabled
+                    goal_reminder_time.value = result.goal_time
+                reminders_message.value = ""
+        except (sqlite3.Error, OSError, ValueError):
+            if reminders_request is request:
+                reminders_message.value = "Não foi possível consultar os lembretes; o preenchimento anterior foi mantido."
+        finally:
+            if reminders_request is request:
+                reminders_request = None
+            reminders_loading = False
+            render()
+
+    async def refresh_reminders(event=None) -> None:
+        nonlocal busy
+        if busy or not ready or reminders_loading or reminders_saving or delete_dialog is not None or not connected:
+            return
+        busy = True
+        render()
+        async with state_lock:
+            try:
+                await read_reminder_preference()
+            finally:
+                busy = False
+                render()
+
+    async def save_reminders(event) -> None:
+        nonlocal busy, reminders_saving, saved_reminders, reminders_loaded
+        if busy or not ready or not reminders_loaded or reminders_saving or delete_dialog is not None or not connected:
+            return
+        selected = reminder_form_value()
+        busy = reminders_saving = True
+        saved = False
+        render()
+        async with state_lock:
+            try:
+                result = await asyncio.to_thread(set_reminder_settings, selected, saved_reminders)
+                saved = True
+                saved_reminders, reminders_loaded = result, True
+                reminders_message.value = "Lembretes salvos neste dispositivo."
+            except ValueError as error:
+                reminders_message.value = ("Lembretes salvos, mas a tela não pôde ser atualizada. Use Atualizar."
+                                          if saved else str(error))
+            except (sqlite3.Error, OSError):
+                reminders_message.value = ("Lembretes salvos, mas a tela não pôde ser atualizada. Use Atualizar."
+                                          if saved else "Não foi possível salvar os lembretes. Seus estudos foram mantidos.")
+            finally:
+                busy = reminders_saving = False
                 render()
 
     async def open_settings(event) -> None:
@@ -2236,6 +2352,8 @@ async def main(page: ft.Page) -> None:
     theme_save_button = ft.Button("Salvar tema", on_click=save_theme)
     theme_cancel_button = ft.TextButton("Cancelar tema", on_click=cancel_theme)
     theme_refresh_button = ft.TextButton("Atualizar tema", on_click=refresh_theme)
+    reminders_save_button = ft.Button("Salvar lembretes", on_click=save_reminders)
+    reminders_refresh_button = ft.TextButton("Atualizar lembretes", on_click=refresh_reminders)
     streak_refresh_button = ft.TextButton("Atualizar ofensiva", on_click=refresh_streak_summary)
     plan_query_button = ft.Button("Consultar data", on_click=query_date_plan)
     plan_edit_button = ft.TextButton("Editar planejamento", on_click=fill_date_editor)
@@ -2251,6 +2369,8 @@ async def main(page: ft.Page) -> None:
         field.on_change = preview_manual_end
     subject_choice.on_select = choose_subject
     mode_choice.on_select = preset_choice.on_select = choose_mode_or_preset
+    study_reminder_enabled.on_change = study_reminder_time.on_change = update_reminder_draft
+    goal_reminder_enabled.on_change = goal_reminder_time.on_change = update_reminder_draft
     study_type.on_select = manual_study_type.on_select = choose_mode_or_preset
     plan_mode.on_select = plan_date.on_change = choose_mode_or_preset
     statistics_choice.on_select = choose_mode_or_preset
@@ -2325,6 +2445,11 @@ async def main(page: ft.Page) -> None:
          ft.Text("Aparência", size=18), theme_status, theme_choice,
          ft.Text("A escolha será aplicada ao salvar. Acompanhar o sistema usa a preferência do dispositivo."),
          ft.Row([theme_save_button, theme_cancel_button, theme_refresh_button], wrap=True), theme_message,
+         ft.Text("Lembretes diários", size=18), reminders_status,
+         ft.Text("Funcionam enquanto o Streakly estiver aberto ou minimizado no Windows. O aviso de meta só aparece se houver meta pendente; dias de descanso e metas atingidas são ignorados."),
+         study_reminder_enabled, study_reminder_time,
+         goal_reminder_enabled, goal_reminder_time,
+         ft.Row([reminders_save_button, reminders_refresh_button], wrap=True), reminders_message,
          ft.Text("Backup local", size=18), backup_message,
          ft.Row([backup_export_button, backup_import_button], wrap=True)],
         expand=True, visible=False, scroll=ft.ScrollMode.AUTO,
@@ -2405,6 +2530,7 @@ async def main(page: ft.Page) -> None:
         select_panel(4)
         open_goal_editor()
         await refresh_theme(event)
+        await refresh_reminders(event)
         render()
 
     async def show_calendar(event) -> None:
@@ -2495,6 +2621,7 @@ async def main(page: ft.Page) -> None:
     try:
         await asyncio.to_thread(initialize_database)
         await read_theme_preference()
+        await read_reminder_preference()
         await refresh_state(reload_study_types=True, reload_streak=True)
     except ValueError as error:
         message.value = str(error)

@@ -12,6 +12,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import storage
+from storage import ReminderSettings
 from test_timer import TemporaryDatabaseTest, at
 
 
@@ -47,6 +48,36 @@ class ThemeTests(TemporaryDatabaseTest):
                 CREATE TRIGGER reject_theme_{operation.lower()} BEFORE {operation} ON app_settings
                 BEGIN SELECT RAISE(ABORT, 'gravação desnecessária'); END
             """)
+
+    def test_reminder_defaults_are_read_only_and_preferences_round_trip(self):
+        before = self.snapshot()
+        default = ReminderSettings()
+        self.assertEqual(storage.read_reminder_settings(), default)
+        self.assertEqual(self.snapshot(), before)
+        selected = ReminderSettings(True, "07:45", True, "21:10")
+        self.assertEqual(storage.set_reminder_settings(selected, default), selected)
+        self.assertEqual(storage.read_reminder_settings(), selected)
+        self.assertEqual(storage.read_theme_mode(), "system")
+        self.assertEqual(self.snapshot(settings=False),
+                         {table: before[table] for table in STUDY_TABLES})
+
+    def test_reminder_stale_expected_values_and_invalid_times_are_rejected(self):
+        default = ReminderSettings()
+        selected = ReminderSettings(True, "07:45", False, "20:00")
+        storage.set_reminder_settings(selected, default)
+        before = self.snapshot()
+        with self.assertRaises(ValueError):
+            storage.set_reminder_settings(ReminderSettings(False, "18:00", False, "20:00"), default)
+        invalid = (
+            ReminderSettings(True, "24:00", False, "20:00"),
+            ReminderSettings(True, "12:60", False, "20:00"),
+            ReminderSettings(True, "7:00", False, "20:00"),
+            ReminderSettings(1, "07:45", False, "20:00"),
+        )
+        for value in invalid:
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                storage.set_reminder_settings(value, selected)
+        self.assertEqual(self.snapshot(), before)
 
     def test_system_default_is_read_only_and_all_modes_preserve_studies(self):
         self.seed_study_data()

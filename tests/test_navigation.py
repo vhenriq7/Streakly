@@ -132,8 +132,9 @@ class NavigationTests(unittest.IsolatedAsyncioTestCase):
             and item.controls[0].value == PANEL_TITLES[index]
         )
 
-    def field(self, label):
-        return next(item for item in self.controls() if getattr(item, "label", None) == label)
+    def field(self, label, occurrence=0):
+        matches = [item for item in self.controls() if getattr(item, "label", None) == label]
+        return matches[occurrence]
 
     def button(self, label):
         return next(
@@ -208,6 +209,28 @@ class NavigationTests(unittest.IsolatedAsyncioTestCase):
                     await self.navigate(0, rail=use_rail)
                     await self.click(label)
                     self.assert_destination(target)
+
+    async def test_reminder_preferences_save_from_settings_and_survive_reopening(self):
+        await self.navigate(4)
+        study = self.field("Lembrar de estudar")
+        goal = self.field("Avisar se a meta estiver pendente")
+        self.assertFalse(study.value)
+        self.assertFalse(goal.value)
+        study.value = True
+        self.field("Horário (HH:MM)").value = "07:30"
+        goal.value = True
+        self.field("Horário (HH:MM)", occurrence=1).value = "20:15"
+        await dispatch(study.on_change, study)
+        await self.click("Salvar lembretes")
+        self.assertEqual(storage.read_reminder_settings(), storage.ReminderSettings(
+            True, "07:30", True, "20:15",
+        ))
+        await self.navigate(0)
+        await self.navigate(4)
+        self.assertTrue(self.field("Lembrar de estudar").value)
+        self.assertEqual(self.field("Horário (HH:MM)").value, "07:30")
+        self.assertTrue(self.field("Avisar se a meta estiver pendente").value)
+
 
     async def test_resize_preserves_session_drafts_history_and_statistics_without_queries(self):
         await self.navigate(3)

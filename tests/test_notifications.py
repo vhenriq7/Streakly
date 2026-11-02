@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 import notifications
+from storage import ReminderSettings
 from timer import PomodoroState, SessionEvent, StudySession
 
 
@@ -115,6 +116,41 @@ class PhaseAlertTrackerTests(unittest.TestCase):
         for candidate in candidates:
             with self.subTest(session=candidate):
                 self.assertIsNone(tracker.observe(candidate))
+
+
+class DailyReminderTrackerTests(unittest.TestCase):
+    def local_time(self, hour, minute, day=28):
+        zone = datetime.now().astimezone().tzinfo
+        return datetime(2026, 10, day, hour, minute, tzinfo=zone)
+
+    def test_study_reminder_fires_once_at_configured_local_time(self):
+        tracker = notifications.DailyReminderTracker()
+        settings = ReminderSettings(study_enabled=True, study_time="18:30")
+        self.assertEqual(tracker.observe(self.local_time(18, 29), settings,
+                                         goal_pending=False), ())
+        notices = tracker.observe(self.local_time(18, 30), settings, goal_pending=False)
+        self.assertEqual(len(notices), 1)
+        self.assertIn("estudar", notices[0].title.lower())
+        self.assertEqual(tracker.observe(self.local_time(18, 30), settings,
+                                         goal_pending=False), ())
+        self.assertEqual(len(tracker.observe(self.local_time(18, 30, day=29), settings,
+                                             goal_pending=False)), 1)
+
+    def test_goal_reminder_requires_pending_goal_and_configured_time(self):
+        tracker = notifications.DailyReminderTracker()
+        settings = ReminderSettings(goal_enabled=True, goal_time="20:00")
+        moment = self.local_time(20, 0)
+        self.assertEqual(tracker.observe(moment, settings, goal_pending=False), ())
+        notice = tracker.observe(moment, settings, goal_pending=True)
+        self.assertEqual(len(notice), 1)
+        self.assertIn("meta", notice[0].title.lower())
+        self.assertEqual(tracker.observe(moment, settings, goal_pending=True), ())
+
+    def test_disabled_reminder_does_not_fire(self):
+        tracker = notifications.DailyReminderTracker()
+        settings = ReminderSettings()
+        self.assertEqual(tracker.observe(self.local_time(18, 0), settings,
+                                         goal_pending=True), ())
 
 
 class WindowsNoticeTests(unittest.TestCase):

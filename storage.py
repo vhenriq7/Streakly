@@ -39,6 +39,14 @@ class DefaultDailyGoal:
 
 
 @dataclass(frozen=True)
+class ReminderSettings:
+    study_enabled: bool = False
+    study_time: str = "18:00"
+    goal_enabled: bool = False
+    goal_time: str = "20:00"
+
+
+@dataclass(frozen=True)
 class DailyGoalOverride:
     id: str
     day: date
@@ -396,6 +404,69 @@ def set_theme_mode(mode: str, expected: str) -> str:
                 ("theme_mode", mode),
             )
         return mode
+
+
+def _read_reminder_settings(connection: sqlite3.Connection) -> ReminderSettings:
+    values = dict(connection.execute(
+        "SELECT key, value FROM app_settings WHERE key IN (?, ?, ?, ?)",
+        ("reminder_study_enabled", "reminder_study_time",
+         "reminder_goal_enabled", "reminder_goal_time"),
+    ).fetchall())
+    for key in ("reminder_study_enabled", "reminder_goal_enabled"):
+        if key in values and values[key] not in ("0", "1"):
+            raise ValueError("A configuração salva dos lembretes está inválida.")
+    settings = ReminderSettings(
+        study_enabled=values.get("reminder_study_enabled", "0") == "1",
+        study_time=values.get("reminder_study_time", "18:00"),
+        goal_enabled=values.get("reminder_goal_enabled", "0") == "1",
+        goal_time=values.get("reminder_goal_time", "20:00"),
+    )
+    _validate_reminder_settings(settings)
+    return settings
+
+
+def _validate_reminder_settings(settings: ReminderSettings) -> None:
+    if not isinstance(settings, ReminderSettings):
+        raise ValueError("Informe configurações válidas para os lembretes.")
+    if type(settings.study_enabled) is not bool or type(settings.goal_enabled) is not bool:
+        raise ValueError("Ative ou desative cada lembrete.")
+    for value in (settings.study_time, settings.goal_time):
+        if (not isinstance(value, str) or len(value) != 5 or value[2] != ":"
+                or not value[:2].isascii() or not value[:2].isdigit()
+                or not value[3:].isascii() or not value[3:].isdigit()):
+            raise ValueError("Informe os horários no formato HH:MM.")
+        hour, minute = int(value[:2]), int(value[3:])
+        if hour > 23 or minute > 59:
+            raise ValueError("Os horários devem estar entre 00:00 e 23:59.")
+
+
+def read_reminder_settings() -> ReminderSettings:
+    """Lê as preferências locais de lembrete sem criar linhas padrão."""
+    with _connection() as connection:
+        return _read_reminder_settings(connection)
+
+
+def set_reminder_settings(settings: ReminderSettings, expected: ReminderSettings) -> ReminderSettings:
+    """Salva os lembretes somente se a versão lida pelo formulário ainda for atual."""
+    _validate_reminder_settings(settings)
+    _validate_reminder_settings(expected)
+    with _connection(write=True) as connection:
+        current = _read_reminder_settings(connection)
+        if current != expected:
+            raise ValueError("Os lembretes mudaram desde a leitura. Atualize antes de salvar.")
+        if current != settings:
+            values = {
+                "reminder_study_enabled": "1" if settings.study_enabled else "0",
+                "reminder_study_time": settings.study_time,
+                "reminder_goal_enabled": "1" if settings.goal_enabled else "0",
+                "reminder_goal_time": settings.goal_time,
+            }
+            connection.executemany(
+                """INSERT INTO app_settings (key, value) VALUES (?, ?)
+                   ON CONFLICT (key) DO UPDATE SET value = excluded.value""",
+                values.items(),
+            )
+        return settings
 
 
 def _read_default_daily_goal(connection: sqlite3.Connection, day: date) -> DefaultDailyGoal | None:

@@ -2,7 +2,7 @@
 
 Aplicativo pessoal de acompanhamento de estudos para **Windows e Android**, com registro de tempo, Pomodoro, metas diárias, ofensivas (streaks), calendário e estatísticas. Projeto **offline-first**: os dados são gravados localmente e sincronizados com a nuvem quando houver conexão.
 
-> **Status:** início do MVP offline. A versão 0.28.0 acrescenta exportação CSV do Histórico (239 testes) e a 0.29.0 acrescenta exportação JSON de todas as tabelas locais (240 testes); ambas estão no GitHub. A versão local 0.30.0 acrescenta prévia e mesclagem do backup por identificador, preservando conflitos locais e salvando uma cópia antes da importação; 243 testes passaram. Conferências visuais na janela do Windows permanecem pendentes. As provas de conceito anteriores validaram persistência no Windows/Android, cronômetro progressivo no Windows e exibição do aviso de foco concluído no Windows, este confirmado pelo usuário em 28/10/2026. Avisos Android e com o app fechado seguem pendentes, nos marcos combinados.
+> **Status:** início do MVP offline. As versões 0.28.0 e 0.29.0 acrescentam exportações CSV/JSON, e a 0.30.0 acrescenta prévia e mesclagem segura do backup por identificador. A versão local 0.31.0 acrescenta lembretes diários opcionais no Windows; **249 testes passaram**. Conferências visuais na janela do Windows permanecem pendentes. As provas de conceito anteriores validaram persistência no Windows/Android, cronômetro progressivo no Windows e exibição do aviso de foco concluído no Windows, este confirmado pelo usuário em 28/10/2026. Lembretes Android e alertas com o app fechado seguem pendentes, nos marcos combinados.
 
 ## Funcionalidades planejadas
 
@@ -332,6 +332,10 @@ A versão 0.29.0 não muda o esquema nem instala dependências. Os **240 testes 
 Em **Configurações**, selecione um backup JSON para validar seu formato, versão do esquema e relações entre as oito tabelas. A prévia mostra quantos registros serão incluídos, já existem ou entram em conflito. A mesclagem usa os identificadores estáveis: registros locais permanecem quando o mesmo ID tem conteúdo diferente, e eventos de uma sessão conflitante não são anexados à sessão local. Repetir a importação não duplica registros.
 
 Antes de aplicar, o Streakly pede para salvar um backup JSON do banco atual. A mesclagem ocorre numa transação SQLite; se houver erro, as alterações são revertidas. A versão local 0.30.0 não muda o esquema nem instala dependências. Os **243 testes passaram**, incluindo JSON malformado e relações inválidas, conflitos, importação repetida, prévia, cópia anterior simulada e comparação do banco. Para conferir no Windows, selecione um backup exportado, revise a prévia, salve a cópia anterior e confirme; depois importe o mesmo arquivo novamente e verifique que não surgem duplicatas. Cancele antes de confirmar e confira que os dados locais continuam iguais.
+
+### Lembretes diários no Windows — versão 0.31.0
+
+Configurações oferece dois lembretes opcionais com horários locais: lembrar de estudar e avisar quando uma meta diária ainda estiver pendente. O aviso de meta não aparece em dias de descanso, sem meta ou após atingir o objetivo. Os padrões são desligados. Preferências ficam no SQLite local e entram nos backups JSON existentes. No Windows, os avisos são verificados enquanto o aplicativo está aberto ou minimizado; não há agendamento quando o processo está encerrado nem envio nativo Android nesta etapa. Não há migração nem dependências novas. A conferência manual da janela permanece pendente.
 
 ## Princípios de desenvolvimento
 
