@@ -2,7 +2,7 @@
 
 ## 1. Escopo
 
-**Prova de conceito Windows — empacotamento 0.31.0:** produzir `Streakly.exe` com nome e metadados de versão, contendo o aplicativo e seu runtime Python para execução sem instalação de Python no computador. Manter o artefato gerado em `build/`, sem adicioná-lo ao repositório, e manter o banco SQLite no armazenamento local do usuário. Esta prova não é instalador nem inclui assinatura digital. A validação Android e a confirmação de persistência no pacote continuam pendentes conforme o roadmap.
+**Prova de conceito Windows — empacotamento 0.31.0:** produzir `Streakly.exe` com nome e metadados de versão, contendo o aplicativo e seu runtime Python para execução sem instalação de Python no computador. Manter o artefato gerado em `build/`, sem adicioná-lo ao repositório, e manter o banco SQLite no armazenamento local do usuário. Esta prova não é instalador nem inclui assinatura digital. O usuário confirmou que o executável abre e preserva os dados ao reabrir; a validação Android continua pendente conforme o roadmap.
 
 Aplicativo pessoal de estudos para **Windows e Android**, com experiência simples, funcionamento offline, sincronização e backup. Uma única conta pessoal; não haverá cadastro público de outros usuários. Interface responsiva com navegação inferior no celular e lateral no PC. Tema claro, escuro e opção de acompanhar o sistema.
 
