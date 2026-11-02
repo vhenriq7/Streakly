@@ -2,7 +2,7 @@
 
 Aplicativo pessoal de acompanhamento de estudos para **Windows e Android**, com registro de tempo, Pomodoro, metas diárias, ofensivas (streaks), calendário e estatísticas. Projeto **offline-first**: os dados são gravados localmente e sincronizados com a nuvem quando houver conexão.
 
-> **Status:** início do MVP offline. A versão 0.27.0 adapta a grade do Calendário a janelas estreitas com largura mínima e rolagem horizontal; os 237 testes passaram, incluindo integração com os controles Flet e SQLite temporário. A etapa local 0.28.0 acrescenta exportação CSV do Histórico; a suíte completa de 239 testes passou, incluindo exportação com mais de 25 sessões e conteúdo com vírgulas e quebra de linha. Conferências visuais na janela do Windows permanecem pendentes. As provas de conceito anteriores validaram persistência no Windows/Android, cronômetro progressivo no Windows e exibição do aviso de foco concluído no Windows, este confirmado pelo usuário em 28/10/2026. Avisos Android e com o app fechado seguem pendentes, nos marcos combinados.
+> **Status:** início do MVP offline. A versão 0.28.0 acrescenta exportação CSV do Histórico; os 239 testes passaram. A versão 0.29.0 acrescenta exportação de backup JSON com todas as tabelas locais, identificadores e versão do esquema; os 240 testes passaram. Ambas estão no GitHub. Conferências visuais na janela do Windows permanecem pendentes. As provas de conceito anteriores validaram persistência no Windows/Android, cronômetro progressivo no Windows e exibição do aviso de foco concluído no Windows, este confirmado pelo usuário em 28/10/2026. Avisos Android e com o app fechado seguem pendentes, nos marcos combinados.
 
 ## Funcionalidades planejadas
 
@@ -319,7 +319,13 @@ Redimensionar preserva os botões dos dias, o mês consultado, o planejamento em
 
 O botão **Exportar CSV** no Histórico salva todas as sessões finalizadas, inclusive as que não estão na página atual. O arquivo inclui identificadores estáveis, matéria, tipo, assunto, horários locais ISO 8601 com fuso, duração efetiva em segundos, modo e origem. A sessão ativa não entra no arquivo. O CSV usa UTF-8 com BOM para preservar acentos em planilhas; o seletor nativo do Flet grava no destino escolhido. Cancelar mantém os dados locais intactos.
 
-A leitura de exportação usa uma única transação SQLite e não altera sessões, metas ou estado do cronômetro. A suíte completa de **239 testes passou**, incluindo leitura integral, seletor de destino simulado, mais de 25 sessões, campos com vírgula/quebra de linha e comparação do banco antes e depois. A versão local 0.28.0 não muda o esquema nem instala dependências. Para conferir no Windows, abra Histórico, exporte o CSV, abra-o em uma planilha e confirme acentos, cabeçalhos, horários com fuso e mais de uma página de sessões. Cancele outra exportação e confirme que o histórico continua igual. A conferência cotidiana no PC não substitui o teste físico Android do marco combinado.
+A leitura de exportação usa uma única transação SQLite e não altera sessões, metas ou estado do cronômetro. A suíte completa de **239 testes passou**, incluindo leitura integral, seletor de destino simulado, mais de 25 sessões, campos com vírgula/quebra de linha e comparação do banco antes e depois. A versão 0.28.0 não muda o esquema nem instala dependências. Para conferir no Windows, abra Histórico, exporte o CSV, abra-o em uma planilha e confirme acentos, cabeçalhos, horários com fuso e mais de uma página de sessões. Cancele outra exportação e confirme que o histórico continua igual. A conferência cotidiana no PC não substitui o teste físico Android do marco combinado.
+
+### Backup JSON — versão 0.29.0
+
+Em **Configurações**, use **Exportar backup JSON** para salvar uma cópia versionada de matérias, sessões (inclusive a ativa), eventos, configurações dos cronômetros, metas, descansos e preferências locais. Os dados são lidos numa única transação SQLite e codificados em UTF-8. O arquivo não inclui credenciais, tokens ou chaves; cancelar o seletor não altera o banco.
+
+A versão 0.29.0 não muda o esquema nem instala dependências. Os **240 testes passaram**, incluindo o seletor simulado, versão e tabelas do arquivo, preferência salva e comparação do banco antes e depois. A importação ainda é uma etapa separada, pois precisa validar o arquivo, apresentar uma prévia e definir o tratamento de conflitos antes de restaurar. Para conferir no Windows, exporte e abra o JSON em um editor de texto; verifique `format`, `format_version`, `schema_version` e as oito tabelas dentro de `tables`. Confirme que preferências e estudos aparecem, que a interface continua utilizável e que cancelar mantém os dados intactos.
 
 ## Princípios de desenvolvimento
 

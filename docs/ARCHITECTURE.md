@@ -209,6 +209,8 @@ Título, avisos, legenda e editor ficam fora da área horizontal. O ajuste de la
 
 **Exportação CSV do Histórico 0.28.0:** `read_all_finished_sessions()` consulta os identificadores ordenados e reconstrói os registros na mesma transação SQLite. A interface serializa esses dados com `csv.writer`, codifica UTF-8 com BOM e entrega os bytes ao `ft.FilePicker.save_file`; essa API permite o destino do usuário sem expor detalhes do caminho Android ao código do banco. O CSV contém somente sessões finalizadas, incluindo identificadores estáveis, metadados, horários locais com offset, duração efetiva, modo e origem. Cancelar o seletor não altera dados. A operação ocorre sob demanda, fora do tick e sem migração ou dependências novas.
 
+**Backup JSON 0.29.0:** `read_backup_snapshot()` consulta as oito tabelas persistidas e `PRAGMA user_version` numa única transação de leitura. A interface acrescenta o identificador do formato, sua versão e o horário UTC da exportação, serializa em JSON UTF-8 e usa o seletor de destino do Flet. A captura preserva UUIDs e linhas relacionadas, incluindo uma sessão ativa, mas não grava no SQLite nem exporta credenciais. A importação permanece separada até serem definidos validação, prévia e tratamento de conflitos; não há migração ou dependências novas.
+
 ## 6. Protocolo de sincronização
 
 1. Salvar alteração **em transação local**, junto com item na outbox.
@@ -289,6 +291,8 @@ O Android reutiliza `main.py`, `storage.py`, `timer.py` e `notifications.py`, co
 **Calendário em janelas estreitas 0.27.0:** os 237 testes passaram. A integração com controles Flet e SQLite temporário verificou a largura mínima de 640 pixels, expansão para uma janela mais larga, descarte de medida não positiva, preservação das linhas e botões e ausência de consultas e gravações durante a alteração de tamanho. A conferência visual na janela nativa do Windows permanece pendente: estreitar a janela, rolar a grade até sábado e domingo, consultar um dia, editar e cancelar o planejamento e navegar entre meses preservando um campo preenchido. Ao ampliar, conferir que a grade ocupa a largura disponível. O teste no PC não comprova comportamento físico no Android, reservado ao marco combinado. O banco pessoal não foi usado. Não há migração, dependências novas ou APK.
 
 **Exportação CSV do Histórico 0.28.0:** os 239 testes passaram. A integração com controles Flet e SQLite temporário verificou leitura completa de 26 sessões, exportação de 27 registros através do seletor simulado, UTF-8 com BOM, campos com vírgula e quebra de linha e ausência de alterações no banco. A conferência visual na janela nativa do Windows permanece pendente: exportar registros de mais de uma página, abrir o arquivo em uma planilha e conferir caracteres acentuados, metadados e offsets de fuso; cancelar outro seletor e verificar que os dados não mudaram. O teste no PC não substitui a validação física Android do marco combinado. O banco pessoal não foi usado; não há migração, dependências novas ou APK.
+
+**Backup JSON 0.29.0:** os 240 testes passaram. A integração verificou que o arquivo UTF-8 parseia, identifica formato e versões, contém as oito tabelas e preferências, e deixa o SQLite idêntico antes e depois; usou seletor simulado e banco temporário. A conferência visual na janela do Windows permanece pendente: exportar, abrir o JSON num editor e conferir identificadores, textos acentuados, eventos, metas e cancelamento. O banco pessoal não foi usado; não há migração, dependências novas ou APK.
 
 Antes do MVP completo:
 

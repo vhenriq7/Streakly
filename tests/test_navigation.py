@@ -3,6 +3,7 @@
 import asyncio
 import csv
 import inspect
+import json
 import io
 import sqlite3
 import tempfile
@@ -328,6 +329,34 @@ class NavigationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rows[0]["Duração efetiva (segundos)"], repr(record.duration_seconds))
         self.assertIn("T", rows[0]["Início local (ISO 8601)"])
         self.assertIn("Funções, gráficos\ncálculo", [row["Assunto"] for row in rows])
+        self.assertEqual(self.database_snapshot(), snapshot)
+
+    async def test_json_backup_exports_all_local_tables_without_database_changes(self):
+        storage.set_theme_mode("dark", "system")
+        snapshot = self.database_snapshot()
+
+        with patch.object(
+            app.ft.FilePicker, "save_file", new_callable=AsyncMock,
+            return_value="C:/exports/Streakly_backup.json",
+        ) as save_file:
+            await self.click("Exportar backup JSON")
+
+        save_file.assert_awaited_once()
+        arguments = save_file.await_args.kwargs
+        self.assertEqual(arguments["file_type"], ft.FilePickerFileType.CUSTOM)
+        self.assertEqual(arguments["allowed_extensions"], ["json"])
+        self.assertTrue(arguments["file_name"].startswith("Streakly_backup_"))
+        backup = json.loads(arguments["src_bytes"].decode("utf-8"))
+        self.assertEqual(backup["format"], "streakly-backup")
+        self.assertEqual(backup["format_version"], 1)
+        self.assertEqual(backup["schema_version"], storage.SCHEMA_VERSION)
+        self.assertEqual(
+            set(backup["tables"]),
+            {"subjects", "sessions", "session_events", "subject_timer_settings",
+             "pomodoro_state", "daily_goal_defaults", "daily_goal_overrides", "app_settings"},
+        )
+        self.assertEqual(backup["tables"]["app_settings"], [{"key": "theme_mode", "value": "dark"}])
+        self.assertEqual(len(backup["tables"]["sessions"]), 2)
         self.assertEqual(self.database_snapshot(), snapshot)
 
     async def test_delayed_reads_do_not_restore_a_view_after_navigating_away(self):

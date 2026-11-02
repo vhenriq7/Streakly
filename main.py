@@ -2,6 +2,7 @@ import asyncio
 import calendar
 import csv
 import io
+import json
 import sqlite3
 from collections.abc import Iterable
 from datetime import UTC, date, datetime, timedelta
@@ -34,6 +35,7 @@ from storage import (
     list_recorded_study_types,
     pause_session,
     read_all_finished_sessions,
+    read_backup_snapshot,
     read_session_history,
     read_daily_plan,
     read_monthly_calendar,
@@ -129,6 +131,20 @@ def history_csv_bytes(sessions: Iterable[StudySession]) -> bytes:
             session.source,
         ))
     return output.getvalue().encode("utf-8-sig")
+
+
+def backup_json_bytes(snapshot: dict[str, object], *, exported_at: datetime | None = None) -> bytes:
+    """Converte a captura SQLite para um arquivo de backup JSON versionado."""
+    moment = exported_at or datetime.now(UTC)
+    if moment.tzinfo is None:
+        raise ValueError("O horário de exportação precisa incluir fuso horário.")
+    backup = {
+        "format": "streakly-backup",
+        "format_version": 1,
+        "exported_at": moment.astimezone(UTC).isoformat(),
+        **snapshot,
+    }
+    return json.dumps(backup, ensure_ascii=False, indent=2, sort_keys=True).encode("utf-8")
 
 
 def parse_study_duration(duration_text: str) -> int:
@@ -233,6 +249,7 @@ async def main(page: ft.Page) -> None:
     history_loaded = False
     history_loading = False
     history_exporting = False
+    backup_exporting = False
     manual_open = False
     manual_saving = False
     editing_session: StudySession | None = None
@@ -274,6 +291,7 @@ async def main(page: ft.Page) -> None:
     )
     theme_status = ft.Text("Carregando tema…")
     theme_message = ft.Text()
+    backup_message = ft.Text("O backup inclui matérias, histórico, metas e preferências locais.")
     streak_current = ft.Text("Ofensiva indisponível.", size=18, weight=ft.FontWeight.BOLD)
     streak_record = ft.Text("Recorde indisponível.")
     streak_hint = ft.Text()
@@ -784,6 +802,7 @@ async def main(page: ft.Page) -> None:
         history_list.visible = not manual_open
         history_refresh_button.disabled = history_locked
         history_export_button.disabled = history_locked or history_exporting
+        backup_export_button.disabled = not ready or backup_exporting
         history_previous_button.disabled = history_locked or not history_loaded or history_offset == 0
         history_next_button.disabled = history_locked or not history_loaded or not history_has_more
         for row in history_list.controls:
@@ -1841,6 +1860,38 @@ async def main(page: ft.Page) -> None:
             history_exporting = False
             render()
 
+    async def export_backup(event) -> None:
+        nonlocal backup_exporting
+        if backup_exporting or not ready or not connected:
+            return
+        backup_exporting = True
+        backup_message.value = "Preparando backup JSON…"
+        render()
+        try:
+            snapshot = await asyncio.to_thread(read_backup_snapshot)
+            if not connected:
+                return
+            content = backup_json_bytes(snapshot)
+            timestamp = datetime.now().astimezone().strftime("%Y-%m-%d")
+            saved_path = await file_picker.save_file(
+                dialog_title="Exportar backup do Streakly",
+                file_name=f"Streakly_backup_{timestamp}.json",
+                file_type=ft.FilePickerFileType.CUSTOM,
+                allowed_extensions=["json"],
+                src_bytes=content,
+            )
+            if connected:
+                backup_message.value = (
+                    f"Backup JSON salvo: {saved_path}" if saved_path else
+                    "Exportação cancelada; nenhum dado foi alterado."
+                )
+        except (sqlite3.Error, OSError, ValueError, RuntimeError):
+            if connected:
+                backup_message.value = "Não foi possível exportar o backup. Tente novamente."
+        finally:
+            backup_exporting = False
+            render()
+
     async def refresh_history(event) -> None:
         await load_history()
 
@@ -2007,6 +2058,7 @@ async def main(page: ft.Page) -> None:
     open_session_button = ft.TextButton("Abrir sessão em andamento", on_click=lambda event: show_timer(event))
     history_refresh_button = ft.TextButton("Atualizar", on_click=refresh_history)
     history_export_button = ft.TextButton("Exportar CSV", on_click=export_history)
+    backup_export_button = ft.Button("Exportar backup JSON", on_click=export_backup)
     history_previous_button = ft.TextButton("Mais recentes", on_click=previous_history_page)
     history_next_button = ft.TextButton("Mais antigas", on_click=next_history_page)
     manual_open_button = ft.TextButton("Adicionar sessão", on_click=open_manual)
@@ -2107,7 +2159,8 @@ async def main(page: ft.Page) -> None:
          goal_settings_status, goal_edit_button, goal_form,
          ft.Text("Aparência", size=18), theme_status, theme_choice,
          ft.Text("A escolha será aplicada ao salvar. Acompanhar o sistema usa a preferência do dispositivo."),
-         ft.Row([theme_save_button, theme_cancel_button, theme_refresh_button], wrap=True), theme_message],
+         ft.Row([theme_save_button, theme_cancel_button, theme_refresh_button], wrap=True), theme_message,
+         ft.Text("Backup local", size=18), backup_message, backup_export_button],
         expand=True, visible=False, scroll=ft.ScrollMode.AUTO,
         horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
     )

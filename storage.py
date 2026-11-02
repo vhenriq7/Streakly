@@ -767,6 +767,21 @@ def read_all_finished_sessions() -> tuple[StudySession, ...]:
         return tuple(_read_session(connection, row["id"]) for row in rows)
 
 
+def read_backup_snapshot() -> dict[str, object]:
+    """Lê todas as tabelas persistidas numa única transação consistente."""
+    tables = (
+        "subjects", "sessions", "session_events", "subject_timer_settings",
+        "pomodoro_state", "daily_goal_defaults", "daily_goal_overrides", "app_settings",
+    )
+    with _connection() as connection:
+        snapshot = {}
+        for table in tables:
+            rows = connection.execute(f"SELECT * FROM {table} ORDER BY 1").fetchall()
+            snapshot[table] = [dict(row) for row in rows]
+        schema_version = connection.execute("PRAGMA user_version").fetchone()[0]
+        return {"schema_version": schema_version, "tables": snapshot}
+
+
 def read_monthly_calendar(
     year: int, month: int, *, at: datetime | None = None, tz: tzinfo | None = None,
 ) -> MonthlyCalendar:
