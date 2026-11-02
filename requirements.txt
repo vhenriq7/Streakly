@@ -1,2 +1,4 @@
 # Ferramentas para desenvolver no Windows. O APK usa o pyproject.toml.
 flet[cli,desktop]==1.0.5
+# Empacotamento do executável Windows com flet pack.
+pyinstaller==6.22.3

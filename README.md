@@ -53,6 +53,16 @@ py -3.14 -m venv .venv
 
 Se a `.venv` já existe, pule o primeiro comando. `requirements.txt` instala as ferramentas de desenvolvimento no Windows. `pyproject.toml` define as dependências do aplicativo empacotado, sem o cliente desktop no Android.
 
+### Executável de teste para Windows
+
+Com as dependências de `requirements.txt` instaladas, gere um executável independente com:
+
+```powershell
+.\.venv\Scripts\flet.exe pack main.py --name Streakly --product-name Streakly --product-version 0.31.0 --file-version 0.31.0.0 --file-description "Acompanhamento pessoal de estudos" --distpath build/windows/0.31.0 --yes
+```
+
+O resultado fica em `build/windows/0.31.0/Streakly.exe`; a pasta `build/` é local e ignorada pelo Git. `flet pack` usa PyInstaller para reunir o aplicativo e o runtime Python em um executável, sem exigir Python instalado no computador de quem o executa. Esta é uma prova de empacotamento, não um instalador: o arquivo ainda não tem assinatura digital. Atualize as opções de versão ao preparar uma nova versão do projeto. O banco continua em `%LOCALAPPDATA%\Streakly\poc.sqlite3`, fora do executável.
+
 **Fluxo de testes combinado:** o desenvolvimento e a validação cotidiana serão feitos no Windows, executando `main.py` e os testes automatizados. Não gerar nem instalar um APK a cada mudança. Retomar os testes no Android em marcos maiores e nas mudanças que dependem da plataforma, como permissões, notificações, segundo plano, armazenamento e empacotamento.
 
 Para gerar o APK de teste:
