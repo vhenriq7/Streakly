@@ -14,6 +14,8 @@ Aplicativo pessoal de estudos para **Windows e Android**, com experiência simpl
 
 **MVP 0.34.0 — diário remoto de sincronização:** criar no PostgreSQL uma tabela append-only para as operações com cursor ordenável, chave de idempotência por conta, entidade, identificador, ação e payload. Aplicar RLS para que usuários autenticados leiam e incluam somente operações da própria conta; negar ao cliente atualização e exclusão, preservando tombstones e o histórico do cursor. Esta etapa define a migração; aplicá-la e testar as políticas no projeto Supabase antes de habilitar tráfego. Não implementar autenticação no app nem envio de dados nesta etapa.
 
+**MVP 0.35.0 — cursor concorrente:** serializar a atribuição do cursor por conta dentro da transação de inclusão. Leituras paginadas por cursor não podem perder uma operação cuja transação tenha confirmado após o cliente avançar além de sua sequência. Lacunas são aceitas, mas cada nova operação visível da mesma conta precisa ter sequência maior que as já confirmadas. Validar comportamento concorrente em PostgreSQL/Supabase antes de ativar sincronização.
+
 ## 2. Matérias e classificação
 
 - Criar, renomear e excluir matérias.
