@@ -12,6 +12,8 @@ Aplicativo pessoal de estudos para **Windows e Android**, com experiência simpl
 
 **MVP 0.26.0 — rolagem de Início e Matérias:** permitir rolar todo o conteúdo de cada um desses painéis quando ultrapassar a altura disponível, incluindo indicadores, atalhos, cadastro, renomeação e lista de matérias. Usar uma rolagem vertical por painel, preservando controles, callbacks, rascunhos, seleção de tela e sessão ao redimensionar. A mudança de tamanho não consulta nem grava dados. Histórico e Calendário mantêm o comportamento existente nesta etapa. Validar cotidianamente no Windows em janelas baixas, sem presumir validação física no Android. Não há migração, dependências novas ou APK; o esquema permanece na versão 8.
 
+**MVP 0.34.0 — diário remoto de sincronização:** criar no PostgreSQL uma tabela append-only para as operações com cursor ordenável, chave de idempotência por conta, entidade, identificador, ação e payload. Aplicar RLS para que usuários autenticados leiam e incluam somente operações da própria conta; negar ao cliente atualização e exclusão, preservando tombstones e o histórico do cursor. Esta etapa define a migração; aplicá-la e testar as políticas no projeto Supabase antes de habilitar tráfego. Não implementar autenticação no app nem envio de dados nesta etapa.
+
 ## 2. Matérias e classificação
 
 - Criar, renomear e excluir matérias.

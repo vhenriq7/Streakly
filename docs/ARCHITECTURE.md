@@ -232,6 +232,8 @@ Título, avisos, legenda e editor ficam fora da área horizontal. O ajuste de la
 
 Evitar a regra simplista de “última escrita vence” para sessões e metas. O sincronizador deve tolerar repetição, falhas intermediárias, reconexões e mudanças de ordem. Sincronização automática enquanto o app está ativo e ao recuperar a rede; botão manual adicional. Restrições de background Android impedem promessa de sincronização contínua com o app fechado.
 
+O primeiro armazenamento remoto será um diário append-only em public.sync_operations. A coluna identity fornece o cursor de leitura; (user_id, operation_id) torna reenvios idempotentes. RLS permite somente SELECT e INSERT próprios para authenticated; o cliente não altera nem apaga operações, mantendo tombstones consultáveis pelos outros dispositivos. A migração inicial fica em supabase/migrations/ e deve ser testada em um projeto Supabase antes de habilitar tráfego.
+
 ## 7. Segurança
 
 - Supabase Auth e RLS para isolar registros da conta.
@@ -311,6 +313,8 @@ O Android reutiliza `main.py`, `storage.py`, `timer.py` e `notifications.py`, co
 **Lembretes Windows 0.31.0:** os 249 testes passaram. Testes com banco temporário verificam padrões somente de leitura, gravação e releitura das preferências, conflito com rascunho desatualizado, validação dos horários e ausência de alteração dos estudos e do tema. Testes do rastreador verificam horário local, disparo único por data, lembrete desativado e exigência de meta pendente; a navegação simulada também salva e relê a configuração. Conferência visual e de notificação na janela do Windows permanece pendente; o banco pessoal não foi usado. Sem migração, dependências novas ou APK.
 
 **Outbox local 0.33.0:** oito testes específicos cobrem captura transacional de matérias, sessões, eventos, metas e estado Pomodoro, leitura sem remoção, ordenação, rollback junto com a gravação local, reconhecimento repetido, exclusão dos updates de tick e migração 8→9 sem enfileirar retroativamente dados. O backup continua no formato anterior; o importador aceita documentos de esquema 8 e 9. A sincronização de dados anteriores será feita numa futura carga inicial de conta. Sem dependências novas ou acesso à rede.
+
+**Diário remoto Supabase 0.34.0:** a migração cria um log por usuário com operação UUID, entidade, payload JSONB e cursor identity; RLS e grants permitem ao cliente autenticado apenas leitura e inclusão próprias. A migração está escrita, mas não aplicada nem executada contra PostgreSQL: não há projeto Supabase nem CLI disponível neste ambiente. A integração Python e a configuração de Auth ainda não foram iniciadas; nenhuma chave ou dado foi enviado à nuvem.
 
 Antes do MVP completo:
 
