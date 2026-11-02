@@ -1,6 +1,7 @@
 """Persistência SQLite da prova de conceito Windows/Android."""
 
 import os
+import json
 import sqlite3
 from calendar import monthrange
 from collections.abc import Iterator
@@ -23,6 +24,11 @@ NAMED_PRESETS = {
     "25/5": (1500, 300, 900, 4),
     "50/10": (3000, 600, 900, 4),
 }
+
+BACKUP_TABLES = (
+    "subjects", "sessions", "session_events", "subject_timer_settings",
+    "pomodoro_state", "daily_goal_defaults", "daily_goal_overrides", "app_settings",
+)
 
 
 @dataclass(frozen=True)
@@ -769,17 +775,159 @@ def read_all_finished_sessions() -> tuple[StudySession, ...]:
 
 def read_backup_snapshot() -> dict[str, object]:
     """Lê todas as tabelas persistidas numa única transação consistente."""
-    tables = (
-        "subjects", "sessions", "session_events", "subject_timer_settings",
-        "pomodoro_state", "daily_goal_defaults", "daily_goal_overrides", "app_settings",
-    )
     with _connection() as connection:
-        snapshot = {}
-        for table in tables:
-            rows = connection.execute(f"SELECT * FROM {table} ORDER BY 1").fetchall()
-            snapshot[table] = [dict(row) for row in rows]
-        schema_version = connection.execute("PRAGMA user_version").fetchone()[0]
-        return {"schema_version": schema_version, "tables": snapshot}
+        return _read_backup_snapshot(connection)
+
+
+def _read_backup_snapshot(connection: sqlite3.Connection) -> dict[str, object]:
+    snapshot = {}
+    for table in BACKUP_TABLES:
+        rows = connection.execute(f"SELECT * FROM {table} ORDER BY 1").fetchall()
+        snapshot[table] = [dict(row) for row in rows]
+    schema_version = connection.execute("PRAGMA user_version").fetchone()[0]
+    return {"schema_version": schema_version, "tables": snapshot}
+
+
+def parse_backup_document(content: bytes) -> dict[str, object]:
+    """Valida estrutura, versão e restrições SQLite sem alterar o banco real."""
+    if not isinstance(content, bytes):
+        raise ValueError("O arquivo de backup precisa estar em formato JSON UTF-8.")
+
+    def reject_constant(value: str):
+        raise ValueError(f"O JSON contém um valor numérico inválido: {value}.")
+
+    def reject_duplicate_keys(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"O JSON repete a chave {key!r}.")
+            result[key] = value
+        return result
+
+    try:
+        document = json.loads(
+            content.decode("utf-8"), parse_constant=reject_constant,
+            object_pairs_hook=reject_duplicate_keys,
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as error:
+        raise ValueError("O arquivo não contém um JSON UTF-8 válido.") from error
+    if not isinstance(document, dict) or set(document) != {
+        "format", "format_version", "exported_at", "schema_version", "tables",
+    }:
+        raise ValueError("O arquivo não tem a estrutura de backup do Streakly.")
+    if (document["format"] != "streakly-backup"
+            or type(document["format_version"]) is not int or document["format_version"] != 1):
+        raise ValueError("O formato ou a versão deste backup não é compatível.")
+    if type(document["schema_version"]) is not int or document["schema_version"] != SCHEMA_VERSION:
+        raise ValueError("A versão do esquema do backup não é compatível com este aplicativo.")
+    tables = document["tables"]
+    if not isinstance(tables, dict) or set(tables) != set(BACKUP_TABLES):
+        raise ValueError("O backup não contém exatamente as tabelas esperadas.")
+
+    schema_connection = sqlite3.connect(":memory:")
+    try:
+        schema_connection.row_factory = sqlite3.Row
+        schema_connection.execute("PRAGMA foreign_keys = ON")
+        with _connection() as current:
+            definitions = current.execute(
+                "SELECT type, sql FROM sqlite_master "
+                "WHERE sql IS NOT NULL AND type IN ('table', 'index') "
+                "ORDER BY CASE type WHEN 'table' THEN 0 ELSE 1 END, name"
+            ).fetchall()
+        for definition in definitions:
+            schema_connection.execute(definition["sql"])
+        for table in BACKUP_TABLES:
+            rows = tables[table]
+            if not isinstance(rows, list):
+                raise ValueError(f"A tabela {table} precisa ser uma lista de registros.")
+            columns = {row["name"] for row in schema_connection.execute(f"PRAGMA table_info({table})")}
+            for row in rows:
+                if not isinstance(row, dict) or set(row) != columns:
+                    raise ValueError(f"Um registro da tabela {table} não tem as colunas esperadas.")
+                names = tuple(row)
+                placeholders = ", ".join("?" for _ in names)
+                quoted_names = ", ".join(f'"{name}"' for name in names)
+                schema_connection.execute(
+                    f"INSERT INTO {table} ({quoted_names}) VALUES ({placeholders})",
+                    tuple(row[name] for name in names),
+                )
+        exported_at = document["exported_at"]
+        if not isinstance(exported_at, str):
+            raise ValueError("O horário de exportação do backup é inválido.")
+        try:
+            exported_moment = datetime.fromisoformat(exported_at)
+        except ValueError:
+            raise ValueError("O horário de exportação do backup é inválido.") from None
+        if exported_moment.tzinfo is None or exported_moment.utcoffset() != timedelta(0):
+            raise ValueError("O horário de exportação precisa estar em UTC.")
+    except (sqlite3.Error, TypeError, OverflowError) as error:
+        raise ValueError("O backup contém registros inválidos ou relações inconsistentes.") from error
+    finally:
+        schema_connection.close()
+    return {"schema_version": SCHEMA_VERSION, "tables": tables}
+
+
+def _merge_backup_rows(connection: sqlite3.Connection, tables: dict[str, list[dict]]) -> dict[str, int]:
+    counts = {"inserted": 0, "present": 0, "conflicts": 0}
+    conflicting_sessions: set[str] = set()
+    for table in BACKUP_TABLES:
+        primary_key = next(
+            row["name"] for row in connection.execute(f"PRAGMA table_info({table})") if row["pk"]
+        )
+        columns = tuple(tables[table][0]) if tables[table] else tuple(
+            row["name"] for row in connection.execute(f"PRAGMA table_info({table})")
+        )
+        quoted_columns = ", ".join(f'"{column}"' for column in columns)
+        placeholders = ", ".join("?" for _ in columns)
+        for item in tables[table]:
+            if table in ("session_events", "pomodoro_state") and item["session_id"] in conflicting_sessions:
+                counts["conflicts"] += 1
+                continue
+            existing = connection.execute(
+                f'SELECT * FROM "{table}" WHERE "{primary_key}" = ?',
+                (item[primary_key],),
+            ).fetchone()
+            if existing is not None:
+                if dict(existing) == item:
+                    counts["present"] += 1
+                else:
+                    counts["conflicts"] += 1
+                    if table == "sessions":
+                        conflicting_sessions.add(item["id"])
+                continue
+            try:
+                connection.execute(
+                    f'INSERT INTO "{table}" ({quoted_columns}) VALUES ({placeholders})',
+                    tuple(item[column] for column in columns),
+                )
+                counts["inserted"] += 1
+            except sqlite3.IntegrityError:
+                counts["conflicts"] += 1
+                if table == "sessions":
+                    conflicting_sessions.add(item["id"])
+    return counts
+
+
+def preview_backup_merge(document: dict[str, object]) -> dict[str, object]:
+    """Simula a mesclagem e captura o estado local sem persistir linhas."""
+    tables = document["tables"]
+    with _connection(write=True) as connection:
+        expected_snapshot = _read_backup_snapshot(connection)
+        connection.execute("SAVEPOINT backup_preview")
+        counts = _merge_backup_rows(connection, tables)
+        connection.execute("ROLLBACK TO backup_preview")
+        connection.execute("RELEASE backup_preview")
+        return {"snapshot": expected_snapshot, "counts": counts}
+
+
+def apply_backup_merge(
+    document: dict[str, object], expected_snapshot: dict[str, object],
+) -> dict[str, int]:
+    """Mescla os registros ausentes atomicamente, sem substituir conflitos locais."""
+    with _connection(write=True) as connection:
+        if _read_backup_snapshot(connection) != expected_snapshot:
+            raise ValueError("O banco mudou desde a prévia. Gere outra prévia antes de importar.")
+        return _merge_backup_rows(connection, document["tables"])
 
 
 def read_monthly_calendar(

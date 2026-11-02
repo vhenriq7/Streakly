@@ -1,12 +1,16 @@
 """Consulta do histórico usando somente bancos temporários e horários simulados."""
 
 import json
+import sqlite3
 import subprocess
 import sys
+import tempfile
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
 import storage
+import main as app
 from test_timer import TemporaryDatabaseTest, at
 
 
@@ -30,6 +34,76 @@ class SessionHistoryTests(TemporaryDatabaseTest):
             **{table: self.execute(f"SELECT * FROM {table} ORDER BY 1") for table in tables},
             "schema": self.execute("PRAGMA user_version"),
         }
+
+    def test_backup_validation_and_merge_preserve_local_conflicts_and_repeat_safely(self):
+        saved = self.finish_progressive(topic="Funções e revisão")
+        storage.set_theme_mode("dark", "system")
+        source_snapshot = storage.read_backup_snapshot()
+        backup_bytes = app.backup_json_bytes(source_snapshot, exported_at=at(10))
+        document = storage.parse_backup_document(backup_bytes)
+
+        target_directory = tempfile.TemporaryDirectory(prefix="streakly-backup-target-")
+        self.addCleanup(target_directory.cleanup)
+        target_path = Path(target_directory.name) / "target.sqlite3"
+        with patch.object(storage, "database_path", return_value=target_path):
+            storage.initialize_database()
+            with closing(sqlite3.connect(target_path)) as connection:
+                with connection:
+                    connection.execute(
+                        "INSERT INTO subjects (id, name) VALUES (?, ?)",
+                        (self.subject_id, "Nome local preservado"),
+                    )
+                    source_session = dict(source_snapshot["tables"]["sessions"][0])
+                    source_session["study_type"] = "Tipo local preservado"
+                    session_columns = tuple(source_session)
+                    connection.execute(
+                        f"INSERT INTO sessions ({', '.join(session_columns)}) "
+                        f"VALUES ({', '.join('?' for _ in session_columns)})",
+                        tuple(source_session[column] for column in session_columns),
+                    )
+            storage.add_subject("Biologia")
+            before = storage.read_backup_snapshot()
+
+            preview = storage.preview_backup_merge(document)
+            self.assertEqual(preview["snapshot"], before)
+            self.assertGreater(preview["counts"]["inserted"], 0)
+            self.assertEqual(preview["counts"]["conflicts"], 4)
+            self.assertEqual(storage.read_backup_snapshot(), before)
+
+            result = storage.apply_backup_merge(document, preview["snapshot"])
+            self.assertEqual(result, preview["counts"])
+            subjects = dict(storage.list_subject_options())
+            self.assertEqual(subjects[self.subject_id], "Nome local preservado")
+            imported_sessions = {item.id: item for item in storage.read_all_finished_sessions()}
+            self.assertEqual(imported_sessions[saved.id].study_type, "Tipo local preservado")
+            with closing(sqlite3.connect(target_path)) as connection:
+                event_count = connection.execute(
+                    "SELECT count(*) FROM session_events WHERE session_id = ?", (saved.id,),
+                ).fetchone()[0]
+            self.assertEqual(event_count, 0)
+
+            after_first_import = storage.read_backup_snapshot()
+            second_preview = storage.preview_backup_merge(document)
+            self.assertEqual(second_preview["counts"]["inserted"], 0)
+            self.assertEqual(second_preview["counts"]["conflicts"], 4)
+            repeated = storage.apply_backup_merge(document, second_preview["snapshot"])
+            self.assertEqual(repeated["inserted"], 0)
+            self.assertEqual(storage.read_backup_snapshot(), after_first_import)
+
+    def test_backup_validation_rejects_wrong_version_and_broken_relations(self):
+        self.finish_progressive()
+        snapshot = storage.read_backup_snapshot()
+        content = app.backup_json_bytes(snapshot, exported_at=at(10))
+        document = json.loads(content)
+
+        document["schema_version"] = storage.SCHEMA_VERSION + 1
+        with self.assertRaisesRegex(ValueError, "versão do esquema"):
+            storage.parse_backup_document(json.dumps(document).encode("utf-8"))
+
+        document = json.loads(content)
+        document["tables"]["sessions"][0]["subject_id"] = "missing-subject"
+        with self.assertRaisesRegex(ValueError, "relações inconsistentes"):
+            storage.parse_backup_document(json.dumps(document).encode("utf-8"))
 
     def test_empty_history_has_no_next_page(self):
         page = storage.read_session_history()

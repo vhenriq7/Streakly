@@ -211,6 +211,8 @@ Título, avisos, legenda e editor ficam fora da área horizontal. O ajuste de la
 
 **Backup JSON 0.29.0:** `read_backup_snapshot()` consulta as oito tabelas persistidas e `PRAGMA user_version` numa única transação de leitura. A interface acrescenta o identificador do formato, sua versão e o horário UTC da exportação, serializa em JSON UTF-8 e usa o seletor de destino do Flet. A captura preserva UUIDs e linhas relacionadas, incluindo uma sessão ativa, mas não grava no SQLite nem exporta credenciais. A importação permanece separada até serem definidos validação, prévia e tratamento de conflitos; não há migração ou dependências novas.
 
+**Importação JSON 0.30.0:** `parse_backup_document()` rejeita chaves JSON repetidas, formato/esquema desconhecido, colunas inesperadas, IDs duplicados e violações das restrições e relações SQLite, validando num banco em memória com o esquema local. `preview_backup_merge()` simula a inserção sob savepoint e desfaz a simulação; IDs ausentes são classificados como novos, linhas idênticas como existentes e colisões como conflitos. IDs locais conflitantes prevalecem, e eventos/estado Pomodoro de sessões conflitantes são ignorados. A interface apresenta esses totais e, após confirmação, exige salvar um backup da captura local. `apply_backup_merge()` abre transação de escrita, compara a captura com o estado usado pela prévia e aborta se algo mudou; a mesclagem inteira confirma ou reverte como unidade. Depois atualiza o estado em memória do app.
+
 ## 6. Protocolo de sincronização
 
 1. Salvar alteração **em transação local**, junto com item na outbox.
@@ -293,6 +295,8 @@ O Android reutiliza `main.py`, `storage.py`, `timer.py` e `notifications.py`, co
 **Exportação CSV do Histórico 0.28.0:** os 239 testes passaram. A integração com controles Flet e SQLite temporário verificou leitura completa de 26 sessões, exportação de 27 registros através do seletor simulado, UTF-8 com BOM, campos com vírgula e quebra de linha e ausência de alterações no banco. A conferência visual na janela nativa do Windows permanece pendente: exportar registros de mais de uma página, abrir o arquivo em uma planilha e conferir caracteres acentuados, metadados e offsets de fuso; cancelar outro seletor e verificar que os dados não mudaram. O teste no PC não substitui a validação física Android do marco combinado. O banco pessoal não foi usado; não há migração, dependências novas ou APK.
 
 **Backup JSON 0.29.0:** os 240 testes passaram. A integração verificou que o arquivo UTF-8 parseia, identifica formato e versões, contém as oito tabelas e preferências, e deixa o SQLite idêntico antes e depois; usou seletor simulado e banco temporário. A conferência visual na janela do Windows permanece pendente: exportar, abrir o JSON num editor e conferir identificadores, textos acentuados, eventos, metas e cancelamento. O banco pessoal não foi usado; não há migração, dependências novas ou APK.
+
+**Importação JSON 0.30.0:** os 243 testes passaram. Bancos temporários verificaram rejeição de esquema incompatível e referências quebradas, preservação de conflitos locais de matéria e sessão, não associação de eventos a uma sessão conflitante, repetição sem duplicatas, seletor de arquivo, prévia, salvamento simulado da cópia anterior e estado atualizado na interface. A conferência visual na janela do Windows permanece pendente, incluindo cancelamento, confirmação e importação repetida. O banco pessoal não foi usado; não há migração, dependências novas ou APK.
 
 Antes do MVP completo:
 

@@ -36,6 +36,9 @@ from storage import (
     pause_session,
     read_all_finished_sessions,
     read_backup_snapshot,
+    parse_backup_document,
+    preview_backup_merge,
+    apply_backup_merge,
     read_session_history,
     read_daily_plan,
     read_monthly_calendar,
@@ -250,6 +253,8 @@ async def main(page: ft.Page) -> None:
     history_loading = False
     history_exporting = False
     backup_exporting = False
+    backup_importing = False
+    backup_import_dialog: ft.AlertDialog | None = None
     manual_open = False
     manual_saving = False
     editing_session: StudySession | None = None
@@ -802,7 +807,8 @@ async def main(page: ft.Page) -> None:
         history_list.visible = not manual_open
         history_refresh_button.disabled = history_locked
         history_export_button.disabled = history_locked or history_exporting
-        backup_export_button.disabled = not ready or backup_exporting
+        backup_export_button.disabled = not ready or backup_exporting or busy
+        backup_import_button.disabled = not ready or backup_exporting or backup_importing or busy
         history_previous_button.disabled = history_locked or not history_loaded or history_offset == 0
         history_next_button.disabled = history_locked or not history_loaded or not history_has_more
         for row in history_list.controls:
@@ -1892,6 +1898,164 @@ async def main(page: ft.Page) -> None:
             backup_exporting = False
             render()
 
+    def close_backup_import_dialog(dialog: ft.AlertDialog) -> None:
+        nonlocal backup_import_dialog, backup_importing, busy
+        if backup_import_dialog is not dialog:
+            return
+        backup_import_dialog = None
+        backup_importing = False
+        busy = False
+        if dialog.open:
+            if connected:
+                page.pop_dialog()
+            else:
+                dialog.open = False
+
+    async def confirm_backup_import(event, dialog: ft.AlertDialog,
+                                    document: dict[str, object], expected_snapshot: dict[str, object]) -> None:
+        nonlocal backup_importing, busy, ready, history_loaded, month_dirty, statistics_dirty
+        if backup_import_dialog is not dialog or not backup_importing or not dialog.open:
+            return
+        error_message = dialog.content.controls[-1]
+        error_message.value = "Salvando uma cópia JSON do banco atual antes de importar…"
+        dialog.actions[0].disabled = True
+        dialog.actions[1].disabled = True
+        render()
+        saved_path = None
+        try:
+            safety_copy = backup_json_bytes(expected_snapshot)
+            timestamp = datetime.now().astimezone().strftime("%Y-%m-%d_%H-%M-%S")
+            saved_path = await file_picker.save_file(
+                dialog_title="Salvar cópia de segurança antes da importação",
+                file_name=f"Streakly_antes_da_importacao_{timestamp}.json",
+                file_type=ft.FilePickerFileType.CUSTOM,
+                allowed_extensions=["json"],
+                src_bytes=safety_copy,
+            )
+            if not connected:
+                return
+            if not saved_path:
+                error_message.value = "Cópia cancelada; a importação não foi aplicada."
+                dialog.actions[0].disabled = False
+                dialog.actions[1].disabled = False
+                render()
+                return
+
+            async with state_lock:
+                counts = await asyncio.to_thread(apply_backup_merge, document, expected_snapshot)
+                invalidate_streak_cache()
+                busy = False
+                close_backup_import_dialog(dialog)
+                backup_message.value = (
+                    f"Importação concluída: {counts['inserted']} novos, "
+                    f"{counts['present']} já existentes e {counts['conflicts']} conflitos preservados. "
+                    f"Cópia anterior: {saved_path}"
+                )
+                history_loaded = False
+                month_dirty = statistics_dirty = True
+                await read_theme_preference()
+                await refresh_state(reload_study_types=True, reload_streak=True)
+                if selected_panel == 3:
+                    await load_history()
+                render()
+        except ValueError as error:
+            if backup_import_dialog is dialog:
+                error_message.value = str(error)
+                if "banco mudou desde a prévia" in str(error):
+                    error_message.value += (
+                        f" A cópia anterior foi salva em {saved_path}. Cancele e selecione "
+                        "o arquivo novamente para gerar uma prévia atualizada."
+                    )
+                dialog.actions[0].disabled = False
+                dialog.actions[1].disabled = False
+                render()
+        except (sqlite3.Error, OSError, RuntimeError):
+            if backup_import_dialog is dialog:
+                error_message.value = (
+                    "Não foi possível concluir a importação. O banco foi revertido. "
+                    "Confira se a cópia anterior foi salva antes de tentar novamente."
+                )
+                dialog.actions[0].disabled = False
+                dialog.actions[1].disabled = False
+                render()
+
+    async def import_backup(event) -> None:
+        nonlocal backup_importing, busy, backup_import_dialog
+        if backup_importing or backup_exporting or not ready or not connected:
+            return
+        backup_importing = busy = True
+        backup_message.value = "Selecione um backup JSON válido."
+        render()
+        dialog_shown = False
+        try:
+            files = await file_picker.pick_files(
+                dialog_title="Selecionar backup do Streakly",
+                file_type=ft.FilePickerFileType.CUSTOM,
+                allowed_extensions=["json"],
+                allow_multiple=False,
+                with_data=True,
+            )
+            if not connected:
+                return
+            if not files:
+                backup_message.value = "Importação cancelada; nenhum dado foi alterado."
+                return
+            content = files[0].bytes
+            if content is None:
+                raise ValueError("Não foi possível ler o conteúdo do arquivo escolhido.")
+            document = await asyncio.to_thread(parse_backup_document, content)
+            preview = await asyncio.to_thread(preview_backup_merge, document)
+            expected_snapshot = preview["snapshot"]
+            counts = preview["counts"]
+            error_message = ft.Text()
+            summary = ft.Column(
+                [
+                    ft.Text(f"Registros novos: {counts['inserted']}"),
+                    ft.Text(f"Já existentes sem alteração: {counts['present']}"),
+                    ft.Text(f"Conflitos mantidos no aparelho: {counts['conflicts']}"),
+                    ft.Text("IDs iguais com conteúdo diferente preservam os dados locais. "
+                            "Repetir a importação não duplica registros."),
+                    ft.Text("Antes de importar, será solicitada uma cópia JSON do banco atual."),
+                    error_message,
+                ],
+                tight=True,
+            )
+
+            def cancel_import(event) -> None:
+                if backup_import_dialog is dialog:
+                    close_backup_import_dialog(dialog)
+                    backup_message.value = "Importação cancelada; nenhum dado foi alterado."
+                    render()
+
+            def dismissed(event) -> None:
+                if backup_import_dialog is dialog:
+                    close_backup_import_dialog(dialog)
+                    render()
+
+            dialog = ft.AlertDialog(
+                modal=True, scrollable=True, title=ft.Text("Prévia da importação"),
+                content=summary,
+                actions=[
+                    ft.TextButton("Cancelar", on_click=cancel_import),
+                    ft.Button("Salvar cópia e importar", on_click=lambda e: confirm_backup_import(
+                        e, dialog, document, expected_snapshot,
+                    )),
+                ],
+                on_dismiss=dismissed,
+            )
+            backup_import_dialog = dialog
+            page.show_dialog(dialog)
+            dialog_shown = True
+            backup_message.value = "Confira a prévia e confirme para continuar."
+        except ValueError as error:
+            backup_message.value = str(error)
+        except (sqlite3.Error, OSError, RuntimeError):
+            backup_message.value = "Não foi possível ler ou verificar o backup. Nenhum dado foi alterado."
+        finally:
+            if not dialog_shown:
+                backup_importing = busy = False
+            render()
+
     async def refresh_history(event) -> None:
         await load_history()
 
@@ -2059,6 +2223,7 @@ async def main(page: ft.Page) -> None:
     history_refresh_button = ft.TextButton("Atualizar", on_click=refresh_history)
     history_export_button = ft.TextButton("Exportar CSV", on_click=export_history)
     backup_export_button = ft.Button("Exportar backup JSON", on_click=export_backup)
+    backup_import_button = ft.Button("Importar backup JSON", on_click=import_backup)
     history_previous_button = ft.TextButton("Mais recentes", on_click=previous_history_page)
     history_next_button = ft.TextButton("Mais antigas", on_click=next_history_page)
     manual_open_button = ft.TextButton("Adicionar sessão", on_click=open_manual)
@@ -2160,7 +2325,8 @@ async def main(page: ft.Page) -> None:
          ft.Text("Aparência", size=18), theme_status, theme_choice,
          ft.Text("A escolha será aplicada ao salvar. Acompanhar o sistema usa a preferência do dispositivo."),
          ft.Row([theme_save_button, theme_cancel_button, theme_refresh_button], wrap=True), theme_message,
-         ft.Text("Backup local", size=18), backup_message, backup_export_button],
+         ft.Text("Backup local", size=18), backup_message,
+         ft.Row([backup_export_button, backup_import_button], wrap=True)],
         expand=True, visible=False, scroll=ft.ScrollMode.AUTO,
         horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
     )

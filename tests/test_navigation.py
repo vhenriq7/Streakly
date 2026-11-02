@@ -47,12 +47,21 @@ class FakePage:
         self.app_visible = True
         self.controls = []
         self.tasks = []
+        self.dialogs = []
 
     def add(self, *controls):
         self.controls.extend(controls)
 
     def update(self):
         pass
+
+    def show_dialog(self, dialog):
+        dialog.open = True
+        self.dialogs.append(dialog)
+
+    def pop_dialog(self):
+        if self.dialogs:
+            self.dialogs.pop().open = False
 
     def run_task(self, handler):
         future = Future()
@@ -358,6 +367,49 @@ class NavigationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(backup["tables"]["app_settings"], [{"key": "theme_mode", "value": "dark"}])
         self.assertEqual(len(backup["tables"]["sessions"]), 2)
         self.assertEqual(self.database_snapshot(), snapshot)
+
+    async def test_json_backup_import_shows_preview_saves_safety_copy_and_merges(self):
+        source_directory = tempfile.TemporaryDirectory(prefix="streakly-backup-source-")
+        self.addCleanup(source_directory.cleanup)
+        source_path = Path(source_directory.name) / "source.sqlite3"
+        with patch.object(storage, "database_path", return_value=source_path):
+            storage.initialize_database()
+            storage.add_subject("Física")
+            imported_subject_id = storage.list_subject_options()[0][0]
+            imported_session = storage.create_manual_session(
+                imported_subject_id, "Exercícios", NOW - timedelta(days=1), 90,
+                "Energia e movimento", at=NOW,
+            )
+            source_backup = app.backup_json_bytes(storage.read_backup_snapshot(), exported_at=NOW)
+
+        before = self.database_snapshot()
+        with patch.object(
+            app.ft.FilePicker, "pick_files", new_callable=AsyncMock,
+            return_value=[SimpleNamespace(bytes=source_backup)],
+        ) as pick_files, patch.object(
+            app.ft.FilePicker, "save_file", new_callable=AsyncMock,
+            return_value="C:/exports/Streakly_before_import.json",
+        ) as save_file:
+            await self.click("Importar backup JSON")
+
+            pick_files.assert_awaited_once()
+            self.assertEqual(len(self.page.dialogs), 1)
+            dialog = self.page.dialogs[0]
+            self.assertEqual(dialog.title.value, "Prévia da importação")
+            self.assertTrue(dialog.content.controls[0].value.startswith("Registros novos:"))
+            await dispatch(dialog.actions[1].on_click, dialog.actions[1])
+
+        save_file.assert_awaited_once()
+        safety_doc = json.loads(save_file.await_args.kwargs["src_bytes"].decode("utf-8"))
+        self.assertEqual(
+            safety_doc["tables"]["subjects"],
+            [{"id": item[0], "name": item[1]} for item in before["subjects"]],
+        )
+        self.assertIn(imported_session.id, {
+            item.id for item in storage.read_all_finished_sessions()
+        })
+        self.assertIn(imported_subject_id, dict(storage.list_subject_options()))
+        self.assertEqual(self.page.dialogs, [])
 
     async def test_delayed_reads_do_not_restore_a_view_after_navigating_away(self):
         for index, reader_name in ((3, "read_session_history"), (4, "read_theme_mode"),

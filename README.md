@@ -2,7 +2,7 @@
 
 Aplicativo pessoal de acompanhamento de estudos para **Windows e Android**, com registro de tempo, Pomodoro, metas diárias, ofensivas (streaks), calendário e estatísticas. Projeto **offline-first**: os dados são gravados localmente e sincronizados com a nuvem quando houver conexão.
 
-> **Status:** início do MVP offline. A versão 0.28.0 acrescenta exportação CSV do Histórico; os 239 testes passaram. A versão 0.29.0 acrescenta exportação de backup JSON com todas as tabelas locais, identificadores e versão do esquema; os 240 testes passaram. Ambas estão no GitHub. Conferências visuais na janela do Windows permanecem pendentes. As provas de conceito anteriores validaram persistência no Windows/Android, cronômetro progressivo no Windows e exibição do aviso de foco concluído no Windows, este confirmado pelo usuário em 28/10/2026. Avisos Android e com o app fechado seguem pendentes, nos marcos combinados.
+> **Status:** início do MVP offline. A versão 0.28.0 acrescenta exportação CSV do Histórico (239 testes) e a 0.29.0 acrescenta exportação JSON de todas as tabelas locais (240 testes); ambas estão no GitHub. A versão local 0.30.0 acrescenta prévia e mesclagem do backup por identificador, preservando conflitos locais e salvando uma cópia antes da importação; 243 testes passaram. Conferências visuais na janela do Windows permanecem pendentes. As provas de conceito anteriores validaram persistência no Windows/Android, cronômetro progressivo no Windows e exibição do aviso de foco concluído no Windows, este confirmado pelo usuário em 28/10/2026. Avisos Android e com o app fechado seguem pendentes, nos marcos combinados.
 
 ## Funcionalidades planejadas
 
@@ -326,6 +326,12 @@ A leitura de exportação usa uma única transação SQLite e não altera sessõ
 Em **Configurações**, use **Exportar backup JSON** para salvar uma cópia versionada de matérias, sessões (inclusive a ativa), eventos, configurações dos cronômetros, metas, descansos e preferências locais. Os dados são lidos numa única transação SQLite e codificados em UTF-8. O arquivo não inclui credenciais, tokens ou chaves; cancelar o seletor não altera o banco.
 
 A versão 0.29.0 não muda o esquema nem instala dependências. Os **240 testes passaram**, incluindo o seletor simulado, versão e tabelas do arquivo, preferência salva e comparação do banco antes e depois. A importação ainda é uma etapa separada, pois precisa validar o arquivo, apresentar uma prévia e definir o tratamento de conflitos antes de restaurar. Para conferir no Windows, exporte e abra o JSON em um editor de texto; verifique `format`, `format_version`, `schema_version` e as oito tabelas dentro de `tables`. Confirme que preferências e estudos aparecem, que a interface continua utilizável e que cancelar mantém os dados intactos.
+
+### Importação de backup JSON — versão 0.30.0
+
+Em **Configurações**, selecione um backup JSON para validar seu formato, versão do esquema e relações entre as oito tabelas. A prévia mostra quantos registros serão incluídos, já existem ou entram em conflito. A mesclagem usa os identificadores estáveis: registros locais permanecem quando o mesmo ID tem conteúdo diferente, e eventos de uma sessão conflitante não são anexados à sessão local. Repetir a importação não duplica registros.
+
+Antes de aplicar, o Streakly pede para salvar um backup JSON do banco atual. A mesclagem ocorre numa transação SQLite; se houver erro, as alterações são revertidas. A versão local 0.30.0 não muda o esquema nem instala dependências. Os **243 testes passaram**, incluindo JSON malformado e relações inválidas, conflitos, importação repetida, prévia, cópia anterior simulada e comparação do banco. Para conferir no Windows, selecione um backup exportado, revise a prévia, salve a cópia anterior e confirme; depois importe o mesmo arquivo novamente e verifique que não surgem duplicatas. Cancele antes de confirmar e confira que os dados locais continuam iguais.
 
 ## Princípios de desenvolvimento
 
