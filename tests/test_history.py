@@ -96,9 +96,10 @@ class SessionHistoryTests(TemporaryDatabaseTest):
         content = app.backup_json_bytes(snapshot, exported_at=at(10))
         document = json.loads(content)
 
-        document["schema_version"] = 8
-        legacy_document = storage.parse_backup_document(json.dumps(document).encode("utf-8"))
-        self.assertEqual(legacy_document["schema_version"], storage.SCHEMA_VERSION)
+        for legacy_version in (8, 9):
+            document["schema_version"] = legacy_version
+            legacy_document = storage.parse_backup_document(json.dumps(document).encode("utf-8"))
+            self.assertEqual(legacy_document["schema_version"], storage.SCHEMA_VERSION)
 
         document = json.loads(content)
         document["schema_version"] = storage.SCHEMA_VERSION + 1

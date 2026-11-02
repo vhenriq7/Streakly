@@ -2,7 +2,7 @@
 
 Aplicativo pessoal de acompanhamento de estudos para **Windows e Android**, com registro de tempo, Pomodoro, metas diárias, ofensivas (streaks), calendário e estatísticas. Projeto **offline-first**: os dados são gravados localmente e sincronizados com a nuvem quando houver conexão.
 
-> **Status:** MVP offline, versão 0.36.0. A fila local e o transporte REST preparam a sincronização; o diário remoto protegido por RLS ainda não foi aplicado a um projeto Supabase. O cursor serializa gravações por conta. Login, aplicação dos dados recebidos e sincronização automática ainda não estão conectados. A versão 0.32.0 acrescentou notificações nativas de fim de fase do Pomodoro no Android. Os 271 testes locais passaram. Em 02/11/2026, o usuário confirmou notificações do sistema em um APK recente com o app aberto e em segundo plano; a versão exata testada não foi identificada. O GitHub Actions executa a suíte no Windows a cada push para main e pull request.
+> **Status:** MVP offline, versão 0.37.0. A outbox, o transporte REST e a caixa de entrada local preparam a sincronização; a migração Supabase ainda não foi aplicada a um projeto. Login, aplicação das mudanças recebidas e sincronização automática ainda não estão conectados. A versão 0.32.0 acrescentou notificações nativas de fim de fase do Pomodoro no Android. Os 282 testes locais passaram. Em 02/11/2026, o usuário confirmou notificações do sistema em um APK recente com o app aberto e em segundo plano; a versão exata testada não foi identificada. O GitHub Actions executa a suíte no Windows a cada push para main e pull request.
 
 ## Funcionalidades planejadas
 
@@ -58,10 +58,10 @@ Se a `.venv` já existe, pule o primeiro comando. `requirements.txt` instala as 
 Com as dependências de `requirements.txt` instaladas, gere um executável independente com:
 
 ```powershell
-.\.venv\Scripts\flet.exe pack main.py --name Streakly --product-name Streakly --product-version 0.36.0 --file-version 0.36.0.0 --file-description "Acompanhamento pessoal de estudos" --distpath build/windows/0.36.0 --yes
+.\.venv\Scripts\flet.exe pack main.py --name Streakly --product-name Streakly --product-version 0.37.0 --file-version 0.37.0.0 --file-description "Acompanhamento pessoal de estudos" --distpath build/windows/0.37.0 --yes
 ```
 
-O resultado fica em `build/windows/0.36.0/Streakly.exe`; a pasta `build/` é local e ignorada pelo Git. `flet pack` usa PyInstaller para reunir o aplicativo e o runtime Python em um executável, sem exigir Python instalado no computador de quem o executa. Esta é uma prova de empacotamento, não um instalador: o arquivo ainda não tem assinatura digital. Atualize as opções de versão ao preparar uma nova versão do projeto. O banco continua em `%LOCALAPPDATA%\Streakly\poc.sqlite3`, fora do executável.
+O resultado fica em `build/windows/0.37.0/Streakly.exe`; a pasta `build/` é local e ignorada pelo Git. `flet pack` usa PyInstaller para reunir o aplicativo e o runtime Python em um executável, sem exigir Python instalado no computador de quem o executa. Esta é uma prova de empacotamento, não um instalador: o arquivo ainda não tem assinatura digital. Atualize as opções de versão ao preparar uma nova versão do projeto. O banco continua em `%LOCALAPPDATA%\Streakly\poc.sqlite3`, fora do executável.
 
 **Fluxo de testes combinado:** o desenvolvimento e a validação cotidiana serão feitos no Windows, executando `main.py` e os testes automatizados. Não gerar nem instalar um APK a cada mudança. Retomar os testes no Android em marcos maiores e nas mudanças que dependem da plataforma, como permissões, notificações, segundo plano, armazenamento e empacotamento.
 
@@ -368,6 +368,10 @@ O cursor remoto é atribuído por um trigger que serializa inclusões da mesma c
 ### Transporte REST Supabase — versão 0.36.0
 
 O módulo supabase_sync.py envia lotes idempotentes e só confirma operações após reler e comparar o conteúdo remoto. Também busca páginas pelo cursor. Os testes usam respostas simuladas; o transporte não foi conectado à interface, não faz chamadas reais e não persiste credenciais. Login, aplicação das operações recebidas e teste contra um projeto Supabase ainda são necessários.
+
+### Caixa de entrada remota — versão 0.37.0
+
+O SQLite registra a conta vinculada, o cursor e as operações recebidas ainda não aplicadas. Cada página e seu cursor são gravados juntos; falha reverte ambos. As operações recebidas não alteram matérias ou estudos nesta etapa e ficam fora do backup portátil para permitir futura resolução de conflitos sem sobrescrever dados locais.
 
 ## Princípios de desenvolvimento
 

@@ -4,12 +4,12 @@ import os
 import json
 import sqlite3
 from calendar import monthrange
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import closing, contextmanager
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta, tzinfo
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from timer import (
     PomodoroState, SessionEvent, StudySession, TimerSettings,
@@ -18,7 +18,7 @@ from timer import (
 )
 
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 NAMED_PRESETS = {
     "25/5": (1500, 300, 900, 4),
@@ -89,6 +89,23 @@ class SyncOperation:
     operation: str
     payload: dict[str, object]
     created_at: datetime
+
+
+@dataclass(frozen=True)
+class RemoteSyncOperation:
+    sequence: int
+    id: str
+    entity: str
+    entity_id: str
+    operation: str
+    payload: dict[str, object]
+
+
+@dataclass(frozen=True)
+class SyncMetadata:
+    user_id: str
+    remote_cursor: int
+    updated_at: datetime
 
 
 @dataclass(frozen=True)
@@ -431,6 +448,36 @@ def initialize_database() -> None:
             )
             _create_sync_outbox_triggers(connection)
             connection.execute("PRAGMA user_version = 9")
+            version = 9
+
+        if version == 9:
+            connection.execute(
+                """
+                CREATE TABLE sync_metadata (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    user_id TEXT NOT NULL,
+                    remote_cursor INTEGER NOT NULL CHECK (remote_cursor >= 0),
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE sync_inbox (
+                    sequence INTEGER PRIMARY KEY CHECK (sequence > 0),
+                    id TEXT NOT NULL UNIQUE,
+                    entity TEXT NOT NULL CHECK (entity IN (
+                        'subjects', 'sessions', 'session_events',
+                        'subject_timer_settings', 'pomodoro_state',
+                        'daily_goal_defaults', 'daily_goal_overrides'
+                    )),
+                    entity_id TEXT NOT NULL,
+                    operation TEXT NOT NULL CHECK (operation IN ('upsert', 'delete')),
+                    payload TEXT NOT NULL CHECK (json_valid(payload))
+                )
+                """
+            )
+            connection.execute("PRAGMA user_version = 10")
 
 
 def _create_sync_outbox_triggers(connection: sqlite3.Connection) -> None:
@@ -508,6 +555,165 @@ def acknowledge_sync_operations(operation_ids: tuple[str, ...]) -> int:
             )
             deleted += cursor.rowcount
         return deleted
+
+
+def bind_sync_account(user_id: str) -> SyncMetadata:
+    """Vincula este banco local a uma conta sem trocar silenciosamente de usuário."""
+    user_id = _normalize_sync_uuid(user_id, "usuário")
+    now = datetime.now(UTC)
+    with _connection(write=True) as connection:
+        row = connection.execute(
+            "SELECT user_id, remote_cursor, updated_at FROM sync_metadata WHERE id = 1",
+        ).fetchone()
+        if row is None:
+            connection.execute(
+                "INSERT INTO sync_metadata (id, user_id, remote_cursor, updated_at) "
+                "VALUES (1, ?, 0, ?)",
+                (user_id, now.isoformat()),
+            )
+            return SyncMetadata(user_id, 0, now)
+        if row["user_id"] != user_id:
+            raise ValueError("Este banco já está vinculado a outra conta de sincronização.")
+        return SyncMetadata(
+            row["user_id"], row["remote_cursor"],
+            datetime.fromisoformat(row["updated_at"]),
+        )
+
+
+def read_sync_cursor(user_id: str) -> int:
+    """Lê o cursor remoto da conta vinculada; uma instalação nova começa em zero."""
+    user_id = _normalize_sync_uuid(user_id, "usuário")
+    with _connection() as connection:
+        row = connection.execute(
+            "SELECT user_id, remote_cursor FROM sync_metadata WHERE id = 1",
+        ).fetchone()
+    if row is None:
+        return 0
+    if row["user_id"] != user_id:
+        raise ValueError("A conta informada não corresponde ao banco local vinculado.")
+    return row["remote_cursor"]
+
+
+def accept_remote_sync_page(user_id: str, operations: Sequence[object]) -> int:
+    """Guarda uma página remota e avança o cursor na mesma transação SQLite."""
+    user_id = _normalize_sync_uuid(user_id, "usuário")
+    if not isinstance(operations, Sequence) or isinstance(operations, (str, bytes)):
+        raise ValueError("Informe uma sequência de operações remotas.")
+    if len(operations) > 1000:
+        raise ValueError("A página contém operações demais para ser armazenada de uma vez.")
+
+    prepared: list[tuple[RemoteSyncOperation, str]] = []
+    seen_sequences: set[int] = set()
+    seen_ids: set[str] = set()
+    entities = frozenset(SYNC_OUTBOX_TABLES)
+    for value in operations:
+        try:
+            sequence = value.sequence
+            operation_id = _normalize_sync_uuid(value.id, "operação remota")
+            entity_id = _normalize_sync_uuid(value.entity_id, "entidade remota")
+            entity = value.entity
+            action = value.operation
+            payload = value.payload
+        except (AttributeError, TypeError, ValueError):
+            raise ValueError("A página contém uma operação remota inválida.") from None
+        if (
+            type(sequence) is not int or sequence <= 0
+            or not isinstance(entity, str) or entity not in entities
+            or not isinstance(action, str) or action not in ("upsert", "delete")
+            or not isinstance(payload, dict)
+            or sequence in seen_sequences or operation_id in seen_ids
+        ):
+            raise ValueError("A página contém uma operação remota inválida ou repetida.")
+        try:
+            payload_json = json.dumps(
+                payload, ensure_ascii=False, separators=(",", ":"),
+                sort_keys=True, allow_nan=False,
+            )
+        except (TypeError, ValueError):
+            raise ValueError("O payload remoto não pode ser armazenado como JSON.") from None
+        item = RemoteSyncOperation(
+            sequence, operation_id, entity, entity_id, action, payload,
+        )
+        prepared.append((item, payload_json))
+        seen_sequences.add(sequence)
+        seen_ids.add(operation_id)
+    if any(left[0].sequence >= right[0].sequence for left, right in zip(prepared, prepared[1:])):
+        raise ValueError("As operações remotas devem estar ordenadas pelo cursor.")
+
+    now = datetime.now(UTC).isoformat()
+    with _connection(write=True) as connection:
+        metadata = connection.execute(
+            "SELECT user_id, remote_cursor FROM sync_metadata WHERE id = 1",
+        ).fetchone()
+        if metadata is None:
+            raise ValueError("Vincule a conta antes de receber operações remotas.")
+        if metadata["user_id"] != user_id:
+            raise ValueError("A conta informada não corresponde ao banco local vinculado.")
+        cursor = metadata["remote_cursor"]
+        next_cursor = cursor
+
+        for item, payload_json in prepared:
+            if item.sequence <= cursor:
+                saved = connection.execute(
+                    "SELECT id, entity, entity_id, operation, payload "
+                    "FROM sync_inbox WHERE sequence = ?", (item.sequence,),
+                ).fetchone()
+                if saved is not None and (
+                    saved["id"] != item.id
+                    or saved["entity"] != item.entity
+                    or saved["entity_id"] != item.entity_id
+                    or saved["operation"] != item.operation
+                    or json.loads(saved["payload"]) != item.payload
+                ):
+                    raise ValueError("O cursor remoto já contém outra operação nesta posição.")
+                continue
+
+            existing_id = connection.execute(
+                "SELECT sequence FROM sync_inbox WHERE id = ?", (item.id,),
+            ).fetchone()
+            if existing_id is not None:
+                raise ValueError("O identificador remoto já foi recebido em outra posição.")
+            connection.execute(
+                "INSERT INTO sync_inbox "
+                "(sequence, id, entity, entity_id, operation, payload) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (item.sequence, item.id, item.entity, item.entity_id,
+                 item.operation, payload_json),
+            )
+            next_cursor = item.sequence
+
+        connection.execute(
+            "UPDATE sync_metadata SET remote_cursor = ?, updated_at = ? WHERE id = 1",
+            (next_cursor, now),
+        )
+    return next_cursor
+
+
+def read_remote_sync_inbox(limit: int = 100) -> tuple[RemoteSyncOperation, ...]:
+    """Lê mudanças recebidas sem removê-las nem aplicá-las às tabelas de estudo."""
+    if type(limit) is not int or not 1 <= limit <= 1000:
+        raise ValueError("O limite da caixa de entrada deve estar entre 1 e 1000.")
+    with _connection() as connection:
+        rows = connection.execute(
+            "SELECT sequence, id, entity, entity_id, operation, payload "
+            "FROM sync_inbox ORDER BY sequence LIMIT ?", (limit,),
+        ).fetchall()
+    return tuple(
+        RemoteSyncOperation(
+            row["sequence"], row["id"], row["entity"], row["entity_id"],
+            row["operation"], json.loads(row["payload"]),
+        )
+        for row in rows
+    )
+
+
+def _normalize_sync_uuid(value: object, label: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"O identificador de {label} é inválido.")
+    try:
+        return str(UUID(value))
+    except (ValueError, AttributeError):
+        raise ValueError(f"O identificador de {label} é inválido.") from None
 
 
 def _read_theme_mode(connection: sqlite3.Connection) -> str:
@@ -1032,8 +1238,8 @@ def parse_backup_document(content: bytes) -> dict[str, object]:
     if (document["format"] != "streakly-backup"
             or type(document["format_version"]) is not int or document["format_version"] != 1):
         raise ValueError("O formato ou a versão deste backup não é compatível.")
-    # O esquema 9 só adiciona a fila local, que não pertence ao backup.
-    if type(document["schema_version"]) is not int or document["schema_version"] not in (8, SCHEMA_VERSION):
+    # Esquemas 9 e 10 adicionam estado de sincronização, fora do backup portátil.
+    if type(document["schema_version"]) is not int or document["schema_version"] not in (8, 9, SCHEMA_VERSION):
         raise ValueError("A versão do esquema do backup não é compatível com este aplicativo.")
     tables = document["tables"]
     if not isinstance(tables, dict) or set(tables) != set(BACKUP_TABLES):

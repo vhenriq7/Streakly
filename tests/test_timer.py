@@ -69,6 +69,8 @@ class TemporaryDatabaseTest(unittest.TestCase):
         for table in storage.SYNC_OUTBOX_TABLES:
             for action in ("insert", "update", "delete"):
                 self.execute(f"DROP TRIGGER sync_{table}_{action}")
+        self.execute("DROP TABLE sync_inbox")
+        self.execute("DROP TABLE sync_metadata")
         self.execute("DROP TABLE sync_outbox")
 
     def row_counts(self):

@@ -320,6 +320,8 @@ O Android reutiliza `main.py`, `storage.py`, `timer.py` e `notifications.py`, co
 
 **Transporte REST 0.36.0:** supabase_sync.py usa somente a biblioteca padrão urllib. O envio é limitado a lotes de 100, usa conflito por (user_id, operation_id) para reenvios, e relê os UUIDs enviados comparando entidade, ação e payload antes de retornar IDs confirmados para eventual remoção da outbox. Uma divergência ou falha mantém o lote local. A leitura valida operações e ordenação do cursor remoto. A chave pública e o token são recebidos por chamada e não persistidos; chaves service_role/secret e redirecionamentos são recusados. Onze testes simulam a API; o projeto Supabase não está configurado e nenhuma chamada real foi feita. Login, aplicação transacional de mudanças recebidas, cursor local e coordenação com a interface permanecem pendentes.
 
+**Caixa de entrada local 0.37.0:** a migração 9→10 acrescenta sync_metadata, que vincula o banco a uma conta e guarda o cursor, e sync_inbox, que persiste operações remotas ainda não aplicadas. accept_remote_sync_page() insere a página e atualiza o cursor sob a mesma transação BEGIN IMMEDIATE; repetição idêntica é aceita sem duplicar e conteúdo divergente na mesma sequência é recusado. A leitura da caixa não toca nas tabelas de estudo ou na outbox, permitindo adiar a aplicação até implementar resolução de conflitos. Estado interno não entra em backup. Onze testes cobrem migração, conta, ordem, repetição, rollback e exclusão do formato de backup; o histórico de estudos permanece intacto.
+
 Antes do MVP completo:
 
 1. Empacotar e executar um aplicativo Flet simples no Android e Windows.

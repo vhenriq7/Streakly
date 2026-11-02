@@ -18,6 +18,8 @@ Aplicativo pessoal de estudos para **Windows e Android**, com experiência simpl
 
 **MVP 0.36.0 — transporte REST:** preparar envio de lotes da outbox ao diário Supabase, ignorando reenvios pela chave por conta/operação e confirmando que o servidor guardou o mesmo conteúdo antes de autorizar a remoção local. Buscar páginas ordenadas após o cursor com validação de forma e limite. Usar chave pública e token de sessão fornecido pelo futuro Auth, sem persistir nem registrar o token neste cliente. Não ligar o transporte à interface ou iniciar sincronização automática antes da configuração e teste do projeto Supabase. Sem dependências externas nesta etapa.
 
+**MVP 0.37.0 — recebimento durável:** adicionar ao SQLite um vínculo de conta, cursor remoto e caixa de entrada que não faz parte dos backups. Salvar todas as operações de uma página e avançar o cursor na mesma transação; repetir uma página idêntica não duplica nem altera o estado. Recusar conta diferente, sequência fora de ordem e conteúdo divergente já recebido. Nesta etapa, conservar os dados remotos na caixa de entrada sem aplicá-los ao histórico local; a aplicação depende da política de conflitos por entidade. Não gerar operações locais ao receber dados. Migrar 9→10 sem alterar estudos ou enfileirar dados antigos.
+
 ## 2. Matérias e classificação
 
 - Criar, renomear e excluir matérias.
