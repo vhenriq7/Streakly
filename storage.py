@@ -18,7 +18,7 @@ from timer import (
 )
 
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 NAMED_PRESETS = {
     "25/5": (1500, 300, 900, 4),
@@ -29,6 +29,41 @@ BACKUP_TABLES = (
     "subjects", "sessions", "session_events", "subject_timer_settings",
     "pomodoro_state", "daily_goal_defaults", "daily_goal_overrides", "app_settings",
 )
+
+SYNC_OUTBOX_TABLES = {
+    "subjects": ("id", ("id", "name"), ("id", "name")),
+    "sessions": (
+        "id",
+        ("id", "subject_id", "study_type", "topic", "mode", "status",
+         "started_at", "ended_at", "duration_seconds", "source"),
+        ("subject_id", "study_type", "topic", "mode", "status", "started_at", "ended_at", "source"),
+    ),
+    "session_events": ("id", ("id", "session_id", "sequence", "kind", "occurred_at"),
+                        ("id", "session_id", "sequence", "kind", "occurred_at")),
+    "subject_timer_settings": (
+        "subject_id",
+        ("subject_id", "mode", "focus_seconds", "break_seconds", "long_break_seconds",
+         "cycles_until_long_break", "preset"),
+        ("subject_id", "mode", "focus_seconds", "break_seconds", "long_break_seconds",
+         "cycles_until_long_break", "preset"),
+    ),
+    "pomodoro_state": (
+        "session_id",
+        ("session_id", "phase", "state", "focus_seconds", "break_seconds", "remaining_seconds",
+         "started_at", "updated_at", "long_break_seconds", "cycles_until_long_break",
+         "completed_focuses", "is_long_break", "preset"),
+        ("phase", "state", "focus_seconds", "break_seconds", "started_at", "long_break_seconds",
+         "cycles_until_long_break", "completed_focuses", "is_long_break", "preset"),
+    ),
+    "daily_goal_defaults": (
+        "id", ("id", "effective_from", "duration_seconds"),
+        ("id", "effective_from", "duration_seconds"),
+    ),
+    "daily_goal_overrides": (
+        "id", ("id", "day", "duration_seconds", "is_rest_day"),
+        ("id", "day", "duration_seconds", "is_rest_day"),
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -44,6 +79,16 @@ class ReminderSettings:
     study_time: str = "18:00"
     goal_enabled: bool = False
     goal_time: str = "20:00"
+
+
+@dataclass(frozen=True)
+class SyncOperation:
+    id: str
+    entity: str
+    entity_id: str
+    operation: str
+    payload: dict[str, object]
+    created_at: datetime
 
 
 @dataclass(frozen=True)
@@ -365,6 +410,104 @@ def initialize_database() -> None:
                 """
             )
             connection.execute("PRAGMA user_version = 8")
+            version = 8
+
+        if version == 8:
+            connection.execute(
+                """
+                CREATE TABLE sync_outbox (
+                    sequence INTEGER PRIMARY KEY NOT NULL,
+                    id TEXT NOT NULL UNIQUE,
+                    entity TEXT NOT NULL CHECK (length(entity) > 0),
+                    entity_id TEXT NOT NULL CHECK (length(entity_id) > 0),
+                    operation TEXT NOT NULL CHECK (operation IN ('upsert', 'delete')),
+                    payload TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+            connection.execute(
+                "CREATE INDEX sync_outbox_sequence ON sync_outbox(sequence)"
+            )
+            _create_sync_outbox_triggers(connection)
+            connection.execute("PRAGMA user_version = 9")
+
+
+def _create_sync_outbox_triggers(connection: sqlite3.Connection) -> None:
+    """Capture sincronizável em triggers, na mesma transação da alteração local."""
+    for table, (key, columns, changed_columns) in SYNC_OUTBOX_TABLES.items():
+        for action, operation, row_name in (
+            ("insert", "upsert", "NEW"), ("update", "upsert", "NEW"),
+            ("delete", "delete", "OLD"),
+        ):
+            condition = ""
+            if action == "update":
+                condition = " WHEN " + " OR ".join(
+                    f"NEW.{column} IS NOT OLD.{column}" for column in changed_columns
+                )
+            json_payload = ", ".join(
+                f"'{column}', {row_name}.{column}" for column in columns
+            )
+            connection.execute(
+                f"""
+                CREATE TRIGGER sync_{table}_{action}
+                AFTER {action.upper()} ON {table}{condition}
+                BEGIN
+                    INSERT INTO sync_outbox
+                        (sequence, id, entity, entity_id, operation, payload, created_at)
+                    VALUES (
+                        (SELECT COALESCE(MAX(sequence), 0) + 1 FROM sync_outbox),
+                        lower(
+                            hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' ||
+                            substr(hex(randomblob(2)), 2) || '-' ||
+                            substr('89AB', abs(random() % 4) + 1, 1) ||
+                            substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))
+                        ),
+                        '{table}', {row_name}.{key}, '{operation}',
+                        json_object({json_payload}), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                    );
+                END
+                """
+            )
+
+
+def read_sync_outbox(limit: int = 100) -> tuple[SyncOperation, ...]:
+    """Lê operações pendentes sem removê-las, para permitir reenvio após falha."""
+    if type(limit) is not int or not 1 <= limit <= 1000:
+        raise ValueError("O limite da fila deve estar entre 1 e 1000.")
+    with _connection() as connection:
+        rows = connection.execute(
+            "SELECT id, entity, entity_id, operation, payload, created_at "
+            "FROM sync_outbox ORDER BY sequence LIMIT ?", (limit,),
+        ).fetchall()
+    return tuple(
+        SyncOperation(
+            id=row["id"], entity=row["entity"], entity_id=row["entity_id"],
+            operation=row["operation"], payload=json.loads(row["payload"]),
+            created_at=datetime.fromisoformat(row["created_at"].replace("Z", "+00:00")),
+        )
+        for row in rows
+    )
+
+
+def acknowledge_sync_operations(operation_ids: tuple[str, ...]) -> int:
+    """Remove da fila somente os IDs que um futuro sincronizador confirmou."""
+    if not isinstance(operation_ids, tuple) or any(
+        not isinstance(operation_id, str) or not operation_id for operation_id in operation_ids
+    ):
+        raise ValueError("Informe identificadores válidos de operações confirmadas.")
+    if not operation_ids:
+        return 0
+    with _connection(write=True) as connection:
+        deleted = 0
+        for start in range(0, len(operation_ids), 500):
+            batch = operation_ids[start:start + 500]
+            placeholders = ", ".join("?" for _ in batch)
+            cursor = connection.execute(
+                f"DELETE FROM sync_outbox WHERE id IN ({placeholders})", batch,
+            )
+            deleted += cursor.rowcount
+        return deleted
 
 
 def _read_theme_mode(connection: sqlite3.Connection) -> str:
@@ -889,7 +1032,8 @@ def parse_backup_document(content: bytes) -> dict[str, object]:
     if (document["format"] != "streakly-backup"
             or type(document["format_version"]) is not int or document["format_version"] != 1):
         raise ValueError("O formato ou a versão deste backup não é compatível.")
-    if type(document["schema_version"]) is not int or document["schema_version"] != SCHEMA_VERSION:
+    # O esquema 9 só adiciona a fila local, que não pertence ao backup.
+    if type(document["schema_version"]) is not int or document["schema_version"] not in (8, SCHEMA_VERSION):
         raise ValueError("A versão do esquema do backup não é compatível com este aplicativo.")
     tables = document["tables"]
     if not isinstance(tables, dict) or set(tables) != set(BACKUP_TABLES):

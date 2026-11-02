@@ -351,6 +351,7 @@ with patch.object(storage, 'database_path', return_value=Path(sys.argv[1])):
 
     def test_v2_migration_preserves_active_and_finished_progressive_sessions(self):
         # Retira as adições posteriores para reconstruir um banco v2 real.
+        self.remove_sync_outbox()
         finished = storage.start_session(self.subjects["SQL"], "Aula", at=at(0))
         finished = storage.finish_session(finished.id, at=at(2))
         active = storage.start_session(self.subjects["Python"], "Leitura", at=at(3))
@@ -374,6 +375,7 @@ with patch.object(storage, 'database_path', return_value=Path(sys.argv[1])):
         self.assertEqual(self.execute("SELECT count(*) FROM subject_timer_settings"), [(0,)])
 
     def test_v3_migration_recovers_completed_focuses_without_counting_manual_pauses(self):
+        self.remove_sync_outbox()
         partial = self.start(focus_seconds=1500, break_seconds=300)
         storage.pause_session(partial.id, at=at(600))
         storage.resume_session(partial.id, at=at(620))

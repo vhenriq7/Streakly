@@ -2,7 +2,7 @@
 
 Aplicativo pessoal de acompanhamento de estudos para **Windows e Android**, com registro de tempo, Pomodoro, metas diárias, ofensivas (streaks), calendário e estatísticas. Projeto **offline-first**: os dados são gravados localmente e sincronizados com a nuvem quando houver conexão.
 
-> **Status:** MVP offline, versão 0.32.0. Lembretes diários no Windows e notificações nativas de fim de fase do Pomodoro no Android. O APK foi compilado e o manifesto inclui as permissões e receivers de alarme. **252 testes passaram**. Em 02/11/2026, o usuário confirmou que um APK Android recente mostrou notificações do sistema com o app aberto e em segundo plano; a versão exata testada não foi identificada. O GitHub Actions executa a suíte no Windows a cada push para main e pull request.
+> **Status:** MVP offline, versão 0.33.0. A fila local transacional prepara a sincronização futura; ainda não há login nem envio à nuvem. A versão anterior acrescentou notificações nativas de fim de fase do Pomodoro no Android. Os testes cobrem a fila, migração e regressões offline. Em 02/11/2026, o usuário confirmou notificações do sistema em um APK recente com o app aberto e em segundo plano; a versão exata testada não foi identificada. O GitHub Actions executa a suíte no Windows a cada push para main e pull request.
 
 ## Funcionalidades planejadas
 
@@ -58,10 +58,10 @@ Se a `.venv` já existe, pule o primeiro comando. `requirements.txt` instala as 
 Com as dependências de `requirements.txt` instaladas, gere um executável independente com:
 
 ```powershell
-.\.venv\Scripts\flet.exe pack main.py --name Streakly --product-name Streakly --product-version 0.32.0 --file-version 0.32.0.0 --file-description "Acompanhamento pessoal de estudos" --distpath build/windows/0.32.0 --yes
+.\.venv\Scripts\flet.exe pack main.py --name Streakly --product-name Streakly --product-version 0.33.0 --file-version 0.33.0.0 --file-description "Acompanhamento pessoal de estudos" --distpath build/windows/0.33.0 --yes
 ```
 
-O resultado fica em `build/windows/0.32.0/Streakly.exe`; a pasta `build/` é local e ignorada pelo Git. `flet pack` usa PyInstaller para reunir o aplicativo e o runtime Python em um executável, sem exigir Python instalado no computador de quem o executa. Esta é uma prova de empacotamento, não um instalador: o arquivo ainda não tem assinatura digital. Atualize as opções de versão ao preparar uma nova versão do projeto. O banco continua em `%LOCALAPPDATA%\Streakly\poc.sqlite3`, fora do executável.
+O resultado fica em `build/windows/0.33.0/Streakly.exe`; a pasta `build/` é local e ignorada pelo Git. `flet pack` usa PyInstaller para reunir o aplicativo e o runtime Python em um executável, sem exigir Python instalado no computador de quem o executa. Esta é uma prova de empacotamento, não um instalador: o arquivo ainda não tem assinatura digital. Atualize as opções de versão ao preparar uma nova versão do projeto. O banco continua em `%LOCALAPPDATA%\Streakly\poc.sqlite3`, fora do executável.
 
 **Fluxo de testes combinado:** o desenvolvimento e a validação cotidiana serão feitos no Windows, executando `main.py` e os testes automatizados. Não gerar nem instalar um APK a cada mudança. Retomar os testes no Android em marcos maiores e nas mudanças que dependem da plataforma, como permissões, notificações, segundo plano, armazenamento e empacotamento.
 
@@ -352,6 +352,10 @@ Configurações oferece dois lembretes opcionais com horários locais: lembrar d
 No Android, o botão **Ativar avisos Android** solicita as permissões do sistema, envia uma notificação de teste e agenda o término da fase Pomodoro em andamento. A notificação do sistema continua agendada quando o Streakly vai para segundo plano; pausar ou finalizar cancela o alarme. O próximo foco ou pausa ainda precisa ser iniciado manualmente. Alarmes exatos dependem da permissão correspondente; se ela não for concedida, o Android usa um alarme aproximado. Os lembretes diários continuam limitados ao Windows.
 
 A integração usa `flet-android-notifications==0.12.0`, pacote comunitário MIT marcado como Alpha. O helper Android aplica o manifesto exigido e recompila o APK após o build Flet. A suíte de testes valida o cálculo do prazo a partir do estado persistido. O usuário confirmou a exibição de notificações do sistema em primeiro plano e em segundo plano em um APK recente, mas não identificou sua versão. Não foi confirmado o comportamento com o processo encerrado.
+
+### Preparação da fila de sincronização — versão 0.33.0
+
+O esquema SQLite 9 acrescenta uma fila local de operações com UUID próprio, entidade, identificador, ação e cópia JSON dos dados no momento da gravação. Triggers capturam alterações de matérias, sessões, eventos, configurações do cronômetro e metas na mesma transação que modifica os dados; se a gravação falhar, a operação também é revertida. Leituras não removem itens, permitindo reenvio, e somente uma confirmação explícita os retira. Atualizações frequentes do tempo decorrido e do estado interno do tick Pomodoro são ignoradas. Tema e lembretes são preferências locais e não entram nessa fila. A fila não faz chamadas de rede, não implementa login nem sincroniza registros antigos existentes antes da migração. O formato dos backups continua igual e não inclui a fila.
 
 ## Princípios de desenvolvimento
 

@@ -49,6 +49,11 @@ class ThemeTests(TemporaryDatabaseTest):
                 BEGIN SELECT RAISE(ABORT, 'gravação desnecessária'); END
             """)
 
+    def set_database_back_to_v7(self):
+        self.remove_sync_outbox()
+        self.execute("DROP TABLE app_settings")
+        self.execute("PRAGMA user_version = 7")
+
     def test_reminder_defaults_are_read_only_and_preferences_round_trip(self):
         before = self.snapshot()
         default = ReminderSettings()
@@ -176,8 +181,7 @@ class ThemeTests(TemporaryDatabaseTest):
 
     def test_v7_migration_preserves_all_study_tables_and_is_repeatable(self):
         self.seed_study_data()
-        self.execute("DROP TABLE app_settings")
-        self.execute("PRAGMA user_version = 7")
+        self.set_database_back_to_v7()
         before = self.snapshot(settings=False)
         self.assertTrue(all(before[table] for table in STUDY_TABLES))
         storage.initialize_database()
@@ -191,8 +195,7 @@ class ThemeTests(TemporaryDatabaseTest):
 
     def test_failed_v7_migration_rolls_back_table_and_version_before_retry(self):
         self.seed_study_data()
-        self.execute("DROP TABLE app_settings")
-        self.execute("PRAGMA user_version = 7")
+        self.set_database_back_to_v7()
         before = self.snapshot(settings=False)
         original_connection = storage._connection
 

@@ -258,6 +258,7 @@ with patch.object(storage, 'database_path', return_value=Path(sys.argv[1])):
         self.assertEqual(self.snapshot(), before)
 
     def test_v4_migration_preserves_existing_sessions_events_and_preferences(self):
+        self.remove_sync_outbox()
         finished = storage.start_session(self.subjects["Python"], "Leitura", at=at(0))
         finished = storage.finish_session(finished.id, at=at(10))
         active = storage.start_session(

@@ -96,6 +96,11 @@ class SessionHistoryTests(TemporaryDatabaseTest):
         content = app.backup_json_bytes(snapshot, exported_at=at(10))
         document = json.loads(content)
 
+        document["schema_version"] = 8
+        legacy_document = storage.parse_backup_document(json.dumps(document).encode("utf-8"))
+        self.assertEqual(legacy_document["schema_version"], storage.SCHEMA_VERSION)
+
+        document = json.loads(content)
         document["schema_version"] = storage.SCHEMA_VERSION + 1
         with self.assertRaisesRegex(ValueError, "versão do esquema"):
             storage.parse_backup_document(json.dumps(document).encode("utf-8"))

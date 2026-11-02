@@ -346,6 +346,7 @@ class DateGoalTests(TemporaryDatabaseTest):
         active = storage.start_session(self.subject_id, "Aula", mode="pomodoro",
                                        focus_seconds=10, break_seconds=5, at=at(100))
         active = storage.pause_session(active.id, at=at(105))
+        self.remove_sync_outbox()
         self.execute("DROP TABLE daily_goal_overrides")
         self.execute("DROP TABLE app_settings")
         self.execute("PRAGMA user_version = 6")
@@ -361,6 +362,7 @@ class DateGoalTests(TemporaryDatabaseTest):
 
     def test_failed_v6_migration_rolls_back_the_table_and_version_before_retry(self):
         self.default()
+        self.remove_sync_outbox()
         self.execute("DROP TABLE daily_goal_overrides")
         self.execute("DROP TABLE app_settings")
         self.execute("PRAGMA user_version = 6")

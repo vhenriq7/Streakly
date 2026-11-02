@@ -232,6 +232,7 @@ class DailyGoalTests(TemporaryDatabaseTest):
         active = storage.start_session(self.subject_id, "Aula", mode="pomodoro",
                                        focus_seconds=10, break_seconds=5, at=at(100))
         active = storage.pause_session(active.id, at=at(105))
+        self.remove_sync_outbox()
         self.execute("DROP TABLE daily_goal_overrides")
         self.execute("DROP TABLE daily_goal_defaults")
         self.execute("DROP TABLE app_settings")
@@ -246,6 +247,7 @@ class DailyGoalTests(TemporaryDatabaseTest):
         self.assertEqual(storage.get_active_session(), active)
 
     def test_failed_v5_migration_rolls_back_table_and_version_before_retry(self):
+        self.remove_sync_outbox()
         self.execute("DROP TABLE daily_goal_overrides")
         self.execute("DROP TABLE daily_goal_defaults")
         self.execute("DROP TABLE app_settings")
