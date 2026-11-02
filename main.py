@@ -1,6 +1,9 @@
 import asyncio
 import calendar
+import csv
+import io
 import sqlite3
+from collections.abc import Iterable
 from datetime import UTC, date, datetime, timedelta
 from math import ceil
 
@@ -30,6 +33,7 @@ from storage import (
     initialize_database,
     list_recorded_study_types,
     pause_session,
+    read_all_finished_sessions,
     read_session_history,
     read_daily_plan,
     read_monthly_calendar,
@@ -102,6 +106,31 @@ def parse_local_start(date_text: str, time_text: str) -> datetime:
     return candidates.pop()
 
 
+def history_csv_bytes(sessions: Iterable[StudySession]) -> bytes:
+    """Converte o histórico finalizado em CSV UTF-8 compatível com planilhas."""
+    output = io.StringIO(newline="")
+    writer = csv.writer(output, lineterminator="\r\n")
+    writer.writerow((
+        "ID da sessão", "ID da matéria", "Matéria", "Tipo de estudo", "Assunto",
+        "Início local (ISO 8601)", "Fim local (ISO 8601)",
+        "Duração efetiva (segundos)", "Modo", "Origem",
+    ))
+    for session in sessions:
+        writer.writerow((
+            session.id,
+            session.subject_id,
+            session.subject_name,
+            session.study_type,
+            session.topic or "",
+            session.started_at.astimezone().isoformat(),
+            session.ended_at.astimezone().isoformat() if session.ended_at else "",
+            repr(session.duration_seconds),
+            session.mode,
+            session.source,
+        ))
+    return output.getvalue().encode("utf-8-sig")
+
+
 def parse_study_duration(duration_text: str) -> int:
     """Converte uma duração positiva HH:MM em segundos."""
     parts = duration_text.strip().split(":")
@@ -159,6 +188,7 @@ async def main(page: ft.Page) -> None:
     page.title = "Streakly — prova de conceito"
     page.padding = 16
     page.theme_mode = ft.ThemeMode.SYSTEM
+    file_picker = ft.FilePicker()
 
     session: StudySession | None = None
     subject_options: list[tuple[str, str]] = []
@@ -202,6 +232,7 @@ async def main(page: ft.Page) -> None:
     history_has_more = False
     history_loaded = False
     history_loading = False
+    history_exporting = False
     manual_open = False
     manual_saving = False
     editing_session: StudySession | None = None
@@ -752,6 +783,7 @@ async def main(page: ft.Page) -> None:
         history_toolbar.visible = not manual_open
         history_list.visible = not manual_open
         history_refresh_button.disabled = history_locked
+        history_export_button.disabled = history_locked or history_exporting
         history_previous_button.disabled = history_locked or not history_loaded or history_offset == 0
         history_next_button.disabled = history_locked or not history_loaded or not history_has_more
         for row in history_list.controls:
@@ -1777,6 +1809,38 @@ async def main(page: ft.Page) -> None:
             history_loading = False
             render()
 
+    async def export_history(event) -> None:
+        nonlocal history_exporting
+        if history_exporting or not ready or not connected:
+            return
+        history_exporting = True
+        history_status.value = "Preparando arquivo CSV…"
+        render()
+        try:
+            sessions = await asyncio.to_thread(read_all_finished_sessions)
+            if not connected:
+                return
+            content = history_csv_bytes(sessions)
+            timestamp = datetime.now().astimezone().strftime("%Y-%m-%d")
+            saved_path = await file_picker.save_file(
+                dialog_title="Exportar histórico para CSV",
+                file_name=f"Streakly_historico_{timestamp}.csv",
+                file_type=ft.FilePickerFileType.CUSTOM,
+                allowed_extensions=["csv"],
+                src_bytes=content,
+            )
+            if connected:
+                if saved_path:
+                    history_status.value = f"CSV salvo com {len(sessions)} sessões: {saved_path}"
+                else:
+                    history_status.value = "Exportação cancelada; nenhum dado foi alterado."
+        except (sqlite3.Error, OSError, ValueError, RuntimeError):
+            if connected:
+                history_status.value = "Não foi possível exportar o histórico. Tente novamente."
+        finally:
+            history_exporting = False
+            render()
+
     async def refresh_history(event) -> None:
         await load_history()
 
@@ -1942,6 +2006,7 @@ async def main(page: ft.Page) -> None:
     test_notice_button = ft.TextButton("Testar aviso do Windows", on_click=test_notice)
     open_session_button = ft.TextButton("Abrir sessão em andamento", on_click=lambda event: show_timer(event))
     history_refresh_button = ft.TextButton("Atualizar", on_click=refresh_history)
+    history_export_button = ft.TextButton("Exportar CSV", on_click=export_history)
     history_previous_button = ft.TextButton("Mais recentes", on_click=previous_history_page)
     history_next_button = ft.TextButton("Mais antigas", on_click=next_history_page)
     manual_open_button = ft.TextButton("Adicionar sessão", on_click=open_manual)
@@ -2020,8 +2085,8 @@ async def main(page: ft.Page) -> None:
         horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
     )
     history_toolbar = ft.Row(
-        [manual_open_button, history_refresh_button, history_previous_button, history_page_label,
-         history_next_button], wrap=True,
+        [manual_open_button, history_export_button, history_refresh_button,
+         history_previous_button, history_page_label, history_next_button], wrap=True,
     )
     history_panel = ft.Column(
         [

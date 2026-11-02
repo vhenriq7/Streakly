@@ -1,7 +1,9 @@
 """Navegação adaptável com controles Flet reais e banco temporário."""
 
 import asyncio
+import csv
 import inspect
+import io
 import sqlite3
 import tempfile
 import unittest
@@ -10,7 +12,7 @@ from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import DEFAULT, patch
+from unittest.mock import AsyncMock, DEFAULT, patch
 
 import flet as ft
 
@@ -294,6 +296,39 @@ class NavigationTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(self.database_snapshot(), snapshot)
         self.assert_destination(5)
+
+    async def test_history_export_saves_finalized_sessions_without_database_changes(self):
+        await self.navigate(3)
+        record = storage.read_session_history().sessions[0]
+        for index in range(26):
+            topic = "Funções, gráficos\ncálculo" if index == 0 else None
+            storage.create_manual_session(
+                self.subject_id, "Leitura", NOW - timedelta(days=10, minutes=index * 2),
+                60, topic, at=NOW,
+            )
+        snapshot = self.database_snapshot()
+
+        with patch.object(
+            app.ft.FilePicker, "save_file", new_callable=AsyncMock,
+            return_value="C:/exports/Streakly.csv",
+        ) as save_file:
+            await self.click("Exportar CSV")
+
+        save_file.assert_awaited_once()
+        arguments = save_file.await_args.kwargs
+        self.assertEqual(arguments["file_type"], ft.FilePickerFileType.CUSTOM)
+        self.assertEqual(arguments["allowed_extensions"], ["csv"])
+        self.assertTrue(arguments["file_name"].startswith("Streakly_historico_"))
+        rows = list(csv.DictReader(io.StringIO(arguments["src_bytes"].decode("utf-8-sig"))))
+        self.assertEqual(len(rows), 27)
+        self.assertEqual(rows[0]["ID da sessão"], record.id)
+        self.assertEqual(rows[0]["ID da matéria"], record.subject_id)
+        self.assertEqual(rows[0]["Matéria"], record.subject_name)
+        self.assertEqual(rows[0]["Tipo de estudo"], record.study_type)
+        self.assertEqual(rows[0]["Duração efetiva (segundos)"], repr(record.duration_seconds))
+        self.assertIn("T", rows[0]["Início local (ISO 8601)"])
+        self.assertIn("Funções, gráficos\ncálculo", [row["Assunto"] for row in rows])
+        self.assertEqual(self.database_snapshot(), snapshot)
 
     async def test_delayed_reads_do_not_restore_a_view_after_navigating_away(self):
         for index, reader_name in ((3, "read_session_history"), (4, "read_theme_mode"),

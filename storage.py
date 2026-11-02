@@ -757,6 +757,16 @@ def read_session_history(*, limit: int = 25, offset: int = 0) -> HistoryPage:
         )
 
 
+def read_all_finished_sessions() -> tuple[StudySession, ...]:
+    """Lê todas as sessões finalizadas em uma única visão do banco."""
+    with _connection() as connection:
+        rows = connection.execute(
+            "SELECT id FROM sessions WHERE status = 'finished' "
+            "ORDER BY started_at DESC, id DESC"
+        ).fetchall()
+        return tuple(_read_session(connection, row["id"]) for row in rows)
+
+
 def read_monthly_calendar(
     year: int, month: int, *, at: datetime | None = None, tz: tzinfo | None = None,
 ) -> MonthlyCalendar:

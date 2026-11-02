@@ -2,7 +2,7 @@
 
 Aplicativo pessoal de acompanhamento de estudos para **Windows e Android**, com registro de tempo, Pomodoro, metas diárias, ofensivas (streaks), calendário e estatísticas. Projeto **offline-first**: os dados são gravados localmente e sincronizados com a nuvem quando houver conexão.
 
-> **Status:** início do MVP offline. A versão 0.27.0 adapta a grade do Calendário a janelas estreitas com largura mínima e rolagem horizontal; os 237 testes passaram, incluindo integração com os controles Flet e SQLite temporário. A conferência visual na janela do Windows permanece pendente. As provas de conceito anteriores validaram persistência no Windows/Android, cronômetro progressivo no Windows e exibição do aviso de foco concluído no Windows, este confirmado pelo usuário em 28/10/2026. Avisos Android e com o app fechado seguem pendentes, nos marcos combinados.
+> **Status:** início do MVP offline. A versão 0.27.0 adapta a grade do Calendário a janelas estreitas com largura mínima e rolagem horizontal; os 237 testes passaram, incluindo integração com os controles Flet e SQLite temporário. A etapa local 0.28.0 acrescenta exportação CSV do Histórico; a suíte completa de 239 testes passou, incluindo exportação com mais de 25 sessões e conteúdo com vírgulas e quebra de linha. Conferências visuais na janela do Windows permanecem pendentes. As provas de conceito anteriores validaram persistência no Windows/Android, cronômetro progressivo no Windows e exibição do aviso de foco concluído no Windows, este confirmado pelo usuário em 28/10/2026. Avisos Android e com o app fechado seguem pendentes, nos marcos combinados.
 
 ## Funcionalidades planejadas
 
@@ -314,6 +314,12 @@ Redimensionar mantém os controles existentes, o preenchimento e a sessão em an
 A grade do **Calendário** mantém largura mínima de **640 pixels** e permite rolagem horizontal para alcançar todos os dias, inclusive sábado e domingo, em janelas estreitas. O cabeçalho dos dias da semana acompanha a grade na mesma rolagem. Ao ampliar a janela, a grade preenche a largura disponível. Título, avisos, legenda e editor de planejamento permanecem fora dessa área horizontal.
 
 Redimensionar preserva os botões dos dias, o mês consultado, o planejamento em edição e a sessão, sem remontar a grade ou repetir consultas. A suíte completa de **237 testes passou**; a integração com controles Flet confirmou largura mínima e expansão, identidade dos botões e ausência de consultas ou gravações causadas pelo redimensionamento. A conferência visual ainda está pendente. O esquema continua na versão 8, sem migração, dependências novas ou APK. Para conferir no Windows, estreite a janela, role até sábado e domingo, selecione um dia, edite e cancele o planejamento. Navegue entre meses com um campo ainda preenchido e confira que ele permanece; amplie a janela e verifique o preenchimento da largura disponível. Esse teste no PC não substitui o marco de validação física no Android.
+
+### Exportação CSV do Histórico — versão 0.28.0
+
+O botão **Exportar CSV** no Histórico salva todas as sessões finalizadas, inclusive as que não estão na página atual. O arquivo inclui identificadores estáveis, matéria, tipo, assunto, horários locais ISO 8601 com fuso, duração efetiva em segundos, modo e origem. A sessão ativa não entra no arquivo. O CSV usa UTF-8 com BOM para preservar acentos em planilhas; o seletor nativo do Flet grava no destino escolhido. Cancelar mantém os dados locais intactos.
+
+A leitura de exportação usa uma única transação SQLite e não altera sessões, metas ou estado do cronômetro. A suíte completa de **239 testes passou**, incluindo leitura integral, seletor de destino simulado, mais de 25 sessões, campos com vírgula/quebra de linha e comparação do banco antes e depois. A versão local 0.28.0 não muda o esquema nem instala dependências. Para conferir no Windows, abra Histórico, exporte o CSV, abra-o em uma planilha e confirme acentos, cabeçalhos, horários com fuso e mais de uma página de sessões. Cancele outra exportação e confirme que o histórico continua igual. A conferência cotidiana no PC não substitui o teste físico Android do marco combinado.
 
 ## Princípios de desenvolvimento
 

@@ -139,6 +139,23 @@ class SessionHistoryTests(TemporaryDatabaseTest):
                 self.assertEqual(storage.get_active_session(), active)
                 self.assertEqual(self.snapshot(), before)
 
+    def test_full_history_read_is_complete_ordered_and_keeps_data_unchanged(self):
+        finished = [
+            self.finish_progressive(
+                index * 10, index * 10 + 1,
+                topic="Laços, funções" if index == 0 else None,
+            )
+            for index in range(26)
+        ]
+        active = storage.start_session(self.subject_id, "Aula", at=at(300))
+        before = self.snapshot()
+
+        sessions = storage.read_all_finished_sessions()
+
+        self.assertEqual(sessions, tuple(reversed(finished)))
+        self.assertEqual(storage.get_active_session(), active)
+        self.assertEqual(self.snapshot(), before)
+
     def test_new_process_recovers_finished_sessions_without_changing_rows(self):
         saved = self.finish_progressive(topic="Funções")
         active = storage.start_session(self.subject_id, "Aula", at=at(10))
