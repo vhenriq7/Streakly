@@ -2,7 +2,7 @@
 
 Aplicativo pessoal de acompanhamento de estudos para **Windows e Android**, com registro de tempo, Pomodoro, metas diárias, ofensivas (streaks), calendário e estatísticas. Projeto **offline-first**: os dados são gravados localmente e sincronizados com a nuvem quando houver conexão.
 
-> **Status:** MVP offline, versão 0.32.0. Lembretes diários no Windows e notificações nativas de fim de fase do Pomodoro no Android. O APK foi compilado e o manifesto inclui as permissões e receivers de alarme. **252 testes passaram**; a confirmação física desta versão no Android ainda está pendente. O GitHub Actions executa a suíte no Windows a cada push para main e pull request.
+> **Status:** MVP offline, versão 0.32.0. Lembretes diários no Windows e notificações nativas de fim de fase do Pomodoro no Android. O APK foi compilado e o manifesto inclui as permissões e receivers de alarme. **252 testes passaram**. Em 02/11/2026, o usuário confirmou que um APK Android recente mostrou notificações do sistema com o app aberto e em segundo plano; a versão exata testada não foi identificada. O GitHub Actions executa a suíte no Windows a cada push para main e pull request.
 
 ## Funcionalidades planejadas
 
@@ -351,7 +351,7 @@ Configurações oferece dois lembretes opcionais com horários locais: lembrar d
 
 No Android, o botão **Ativar avisos Android** solicita as permissões do sistema, envia uma notificação de teste e agenda o término da fase Pomodoro em andamento. A notificação do sistema continua agendada quando o Streakly vai para segundo plano; pausar ou finalizar cancela o alarme. O próximo foco ou pausa ainda precisa ser iniciado manualmente. Alarmes exatos dependem da permissão correspondente; se ela não for concedida, o Android usa um alarme aproximado. Os lembretes diários continuam limitados ao Windows.
 
-A integração usa `flet-android-notifications==0.12.0`, pacote comunitário MIT marcado como Alpha. O helper Android aplica o manifesto exigido e recompila o APK após o build Flet. A suíte de testes valida o cálculo do prazo a partir do estado persistido; o APK precisa ser instalado no Android para confirmar as permissões e o comportamento real em segundo plano.
+A integração usa `flet-android-notifications==0.12.0`, pacote comunitário MIT marcado como Alpha. O helper Android aplica o manifesto exigido e recompila o APK após o build Flet. A suíte de testes valida o cálculo do prazo a partir do estado persistido. O usuário confirmou a exibição de notificações do sistema em primeiro plano e em segundo plano em um APK recente, mas não identificou sua versão. Não foi confirmado o comportamento com o processo encerrado.
 
 ## Princípios de desenvolvimento
 
